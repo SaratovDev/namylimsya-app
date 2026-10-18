@@ -1,0 +1,120 @@
+'use client';
+
+import { useState, useEffect, Suspense } from 'react';
+import { supabase } from '@/lib/supabase';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+
+// Выносим логику в отдельный компонент, потому что useSearchParams требует Suspense
+function LoginForm() {
+  const searchParams = useSearchParams();
+  const isRegisterMode = searchParams.get('mode') === 'register';
+  
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  // Инициализируем состояние в зависимости от URL
+  const [isLogin, setIsLogin] = useState(!isRegisterMode); 
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const router = useRouter();
+
+  // Если пользователь перешел по ссылке "Регистрация", обновляем стейт
+  useEffect(() => {
+    setIsLogin(!isRegisterMode);
+  }, [isRegisterMode]);
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage('');
+
+    try {
+      if (isLogin) {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        router.push('/');
+        router.refresh();
+      } else {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        setMessage('Успешно! Теперь вы можете войти.');
+        setIsLogin(true);
+      }
+    } catch (error: any) {
+      setMessage(error.message || 'Произошла ошибка');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8">
+      <h1 className="text-2xl font-extrabold uppercase mb-6 text-center">
+        {isLogin ? 'Вход в Намылимся' : 'Регистрация'}
+      </h1>
+
+      {message && (
+        <div className="mb-4 p-3 bg-brand-bg border-2 border-brand-line rounded-brand text-sm font-bold text-center">
+          {message}
+        </div>
+      )}
+
+      <form onSubmit={handleAuth} className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[12px] font-extrabold uppercase text-brand-muted">Email</label>
+          <input 
+            type="email" 
+            value={email} 
+            onChange={(e) => setEmail(e.target.value)} 
+            required
+            className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[12px] font-extrabold uppercase text-brand-muted">Пароль</label>
+          <input 
+            type="password" 
+            value={password} 
+            onChange={(e) => setPassword(e.target.value)} 
+            required
+            className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+          />
+        </div>
+
+        <button 
+          type="submit" 
+          disabled={loading}
+          className="mt-2 bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors disabled:opacity-50"
+        >
+          {loading ? 'Загрузка...' : (isLogin ? 'Войти' : 'Зарегистрироваться')}
+        </button>
+      </form>
+
+      <div className="mt-6 text-center">
+        <button 
+          onClick={() => setIsLogin(!isLogin)} 
+          className="text-sm font-bold text-brand-muted hover:text-brand-accent transition-colors"
+        >
+          {isLogin ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
+        </button>
+      </div>
+      
+      <div className="mt-4 text-center">
+        <Link href="/" className="text-sm font-bold text-brand-muted hover:text-brand-accent transition-colors">
+          ← Вернуться на главную
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+// Основной экспорт страницы с оберткой Suspense
+export default function LoginPage() {
+  return (
+    <main className="max-w-md mx-auto mt-20 px-6">
+      <Suspense fallback={<div className="text-center font-bold">Загрузка формы...</div>}>
+        <LoginForm />
+      </Suspense>
+    </main>
+  );
+}
