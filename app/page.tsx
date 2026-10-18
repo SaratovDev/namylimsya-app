@@ -40,6 +40,8 @@ async function EventList() {
       {events.map((event) => (
         <EventCard 
           key={event.id}
+          id={event.id}
+          organizerId={event.organizer_id} 
           category={event.category}
           date={formatDate(event.date_time)}
           countdown="Скоро" 

@@ -5,20 +5,18 @@ import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
-// Выносим логику в отдельный компонент, потому что useSearchParams требует Suspense
 function LoginForm() {
   const searchParams = useSearchParams();
   const isRegisterMode = searchParams.get('mode') === 'register';
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  // Инициализируем состояние в зависимости от URL
+  const [username, setUsername] = useState('');
   const [isLogin, setIsLogin] = useState(!isRegisterMode); 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const router = useRouter();
 
-  // Если пользователь перешел по ссылке "Регистрация", обновляем стейт
   useEffect(() => {
     setIsLogin(!isRegisterMode);
   }, [isRegisterMode]);
@@ -30,14 +28,49 @@ function LoginForm() {
 
     try {
       if (isLogin) {
+        // Вход
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         router.push('/');
         router.refresh();
       } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        setMessage('Успешно! Теперь вы можете войти.');
+        // РЕГИСТРАЦИЯ
+        // 1. Проверяем, не занят ли никнейм (простой запрос)
+        const { data: existingUser } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('username', username)
+          .single();
+
+        if (existingUser) {
+          throw new Error('Этот никнейм уже занят. Придумайте другой.');
+        }
+
+        // 2. Создаем пользователя в Auth
+        const { data: authData, error: authError } = await supabase.auth.signUp({ 
+          email, 
+          password 
+        });
+        
+        if (authError) throw authError;
+
+        // 3. Если пользователь создался, обновляем его профиль (добавляем выбранный никнейм)
+        if (authData.user) {
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .update({ username: username })
+            .eq('id', authData.user.id);
+
+          if (profileError) {
+             console.error("Ошибка обновления профиля:", profileError);
+             // Если никнейм не записался (например, из-за уникальности), 
+             // мы должны удалить созданного пользователя, но в Supabase это сложно сделать с клиента.
+             // Поэтому просто просим ввести другой никнейм.
+             throw new Error('Не удалось закрепить никнейм. Возможно, он только что был занят.');
+          }
+        }
+
+        setMessage('Регистрация успешна! Теперь вы можете войти.');
         setIsLogin(true);
       }
     } catch (error: any) {
@@ -60,6 +93,23 @@ function LoginForm() {
       )}
 
       <form onSubmit={handleAuth} className="flex flex-col gap-4">
+        
+        {/* Поле никнейма только для регистрации */}
+        {!isLogin && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш никнейм (публичное имя)</label>
+            <input 
+              type="text" 
+              value={username} 
+              onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Zа-яА-Я0-9_]/g, ''))} // Только буквы, цифры и _
+              required
+              placeholder="например: Вадим_Крутой"
+              className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+            />
+            <span className="text-[11px] text-brand-muted font-bold">Разрешены кириллица, латиница, цифры и _. Одинаковые запрещены.</span>
+          </div>
+        )}
+
         <div className="flex flex-col gap-1.5">
           <label className="text-[12px] font-extrabold uppercase text-brand-muted">Email</label>
           <input 
@@ -108,7 +158,6 @@ function LoginForm() {
   );
 }
 
-// Основной экспорт страницы с оберткой Suspense
 export default function LoginPage() {
   return (
     <main className="max-w-md mx-auto mt-20 px-6">

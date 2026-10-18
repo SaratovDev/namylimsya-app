@@ -1,26 +1,55 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { createEvent } from '@/app/actions';
+import { supabase } from '@/lib/supabase';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 export default function CreateEventForm() {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, setIsPending] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const router = useRouter();
 
-  // Обработчик отправки формы
+  // Проверяем авторизацию при загрузке формы
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+      setIsCheckingAuth(false);
+    });
+  }, []);
+
   async function handleSubmit(formData: FormData) {
     setIsPending(true);
     try {
       await createEvent(formData);
-      formRef.current?.reset(); // Очищаем форму после успеха
+      formRef.current?.reset();
       alert('Событие успешно создано!');
-      // Закрываем аккордеон (находим родительский тег details и убираем атрибут open)
       formRef.current?.closest('details')?.removeAttribute('open');
-    } catch (error) {
-      alert('Ошибка при создании события');
+      router.refresh(); // Обновляем страницу, чтобы событие сразу появилось в ленте
+    } catch (error: any) {
+      alert(error.message || 'Ошибка при создании события');
     } finally {
       setIsPending(false);
     }
+  }
+
+  if (isCheckingAuth) {
+    return <div className="p-4 text-center font-bold text-brand-muted">Проверка авторизации...</div>;
+  }
+
+  // Если пользователь не залогинен, показываем заглушку с кнопкой входа
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-8 text-center">
+        <p className="font-bold text-lg">Чтобы создать событие, нужно войти в аккаунт.</p>
+        <Link href="/login" className="bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors">
+          Войти или зарегистрироваться
+        </Link>
+      </div>
+    );
   }
 
   return (

@@ -8,6 +8,7 @@ import { User } from '@supabase/supabase-js';
 
 export default function Header() {
   const [user, setUser] = useState<User | null>(null);
+  const [username, setUsername] = useState<string | null>(null); // <-- Добавили стейт для никнейма
   const router = useRouter();
 
   useEffect(() => {
@@ -23,6 +24,23 @@ export default function Header() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Как только мы узнали, что пользователь залогинен, запрашиваем его никнейм
+  useEffect(() => {
+    if (user) {
+      supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', user.id)
+        .single()
+        .then(({ data }) => {
+          // Если никнейм нашелся - ставим его. Если нет - берем часть email до @
+          setUsername(data?.username || user.email?.split('@')[0] || 'Пользователь');
+        });
+    } else {
+      setUsername(null);
+    }
+  }, [user]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -46,9 +64,16 @@ export default function Header() {
         <div className="flex items-center gap-3">
           <button className="w-10 h-10 flex items-center justify-center border-2 border-brand-line rounded-brand bg-brand-surface">🌙</button>
           
-  {user ? (
+          {user ? (
             <div className="flex items-center gap-3">
-              <span className="text-sm font-bold hidden sm:block">{user.email}</span>
+              {/* Вот тут вместо email выводим ссылку на профиль */}
+              <Link 
+                href={`/@${username}`} 
+                className="text-sm font-bold hidden sm:block hover:text-brand-accent transition-colors"
+              >
+                @{username}
+              </Link>
+              
               <button onClick={handleLogout} className="bg-brand-surface text-brand-text font-extrabold text-sm uppercase px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-accent hover:text-white transition-colors">
                 Выйти
               </button>
@@ -63,7 +88,6 @@ export default function Header() {
               </Link>
             </div>
           )}
-   
         </div>
       </div>
     </header>
