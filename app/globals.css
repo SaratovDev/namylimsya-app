@@ -80,3 +80,18 @@
 .animate-progress {
   animation: progress 1.5s ease-in-out infinite;
 }
+
+/* Делаем все рамки в проекте тоньше (1px вместо 2px) */
+.border-2 {
+  border-width: 1px !important;
+}
+
+/* Опционально: делаем цвет рамок чуть мягче (не чисто черным, а темно-серым) */
+/* Если хочешь оставить чисто черные, просто удали блок ниже */
+:root {
+  --color-brand-line: #333333; 
+}
+
+[data-theme="dark"] {
+  --color-brand-line: #666666;
+}

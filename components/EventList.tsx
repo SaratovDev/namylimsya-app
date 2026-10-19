@@ -42,6 +42,10 @@ export default async function EventList() {
           organizerName={event.organizer_name} 
           organizerRank={event.organizer_rank} 
           isFull={event.is_full} 
+          location={event.location}
+          lat={event.lat}                // <-- Добавили
+          lng={event.lng}                // <-- Добавили
+          hideLocation={event.hide_location} // <-- Добавили
         />
       ))}
     </div>

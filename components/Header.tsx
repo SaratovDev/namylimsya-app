@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { useRouter, usePathname } from 'next/navigation';
 import { User } from '@supabase/supabase-js';
+import NotificationsBell from './NotificationsBell';
 
 export default function Header() {
   const [user, setUser] = useState<User | null>(null);
@@ -97,6 +98,7 @@ export default function Header() {
             <div className="hidden md:flex items-center gap-3">
               {user ? (
                 <>
+                 <NotificationsBell />
                   <Link href={`/@${username}`} className="text-sm font-bold hover:text-brand-accent transition-colors">
                     @{username}
                   </Link>

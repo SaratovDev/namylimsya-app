@@ -20,6 +20,8 @@ export async function createEvent(formData: FormData) {
 
   const organizerName = profile?.username || 'Пользователь';
 
+  const lat = formData.get('lat') ? parseFloat(formData.get('lat') as string) : null;
+  const lng = formData.get('lng') ? parseFloat(formData.get('lng') as string) : null;
   const title = formData.get('title') as string;
   const description = formData.get('description') as string;
   const category = formData.get('category') as string;
@@ -31,7 +33,7 @@ export async function createEvent(formData: FormData) {
 
   const dateTime = new Date(`${date}T${time}`).toISOString();
 
-  const { error } = await supabase
+    const { error } = await supabase
     .from('events')
     .insert([
       {
@@ -40,10 +42,12 @@ export async function createEvent(formData: FormData) {
         category,
         date_time: dateTime,
         location,
+        lat,
+        lng, 
         max_participants: maxParticipants,
         hide_location: hideLocation,
         organizer_name: organizerName, 
-          organizer_id: user.id, 
+        organizer_id: user.id, 
         organizer_rank: 'Инициатор',
       },
     ]);
@@ -56,34 +60,59 @@ export async function createEvent(formData: FormData) {
   revalidatePath('/');
 }
 
+
 export async function approveApplication(applicationId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) throw new Error('Не авторизован');
 
-  // 1. Получаем список ID событий, которые принадлежат этому организатору
+  // 1. Получаем ID событий организатора (для проверки безопасности)
   const { data: userEvents } = await supabase
     .from('events')
     .select('id')
     .eq('organizer_id', user.id);
 
-  if (!userEvents || userEvents.length === 0) {
-    throw new Error('У вас нет созданных событий');
-  }
-
+  if (!userEvents || userEvents.length === 0) throw new Error('У вас нет созданных событий');
   const eventIds = userEvents.map(e => e.id);
 
-  // 2. Обновляем заявку, проверяя, что она относится к одному из этих событий
+  // 2. Обновляем статус заявки
   const { error } = await supabase
     .from('applications')
     .update({ status: 'approved' })
     .eq('id', applicationId)
-    .in('event_id', eventIds); // <--- Вот тут передаем массив ID
+    .in('event_id', eventIds);
 
   if (error) {
     console.error("Ошибка обновления:", error);
     throw new Error('Не удалось подтвердить заявку');
+  }
+
+  // 3. Получаем ID пользователя и ID события из заявки
+  const { data: appData } = await supabase
+    .from('applications')
+    .select('user_id, event_id')
+    .eq('id', applicationId)
+    .single();
+
+  if (appData) {
+    // 4. Отдельным запросом получаем название события
+    const { data: eventData } = await supabase
+      .from('events')
+      .select('title')
+      .eq('id', appData.event_id)
+      .single();
+
+    // 5. Создаем уведомление
+    if (eventData) {
+      const { error: notifError } = await supabase.from('notifications').insert({
+        user_id: appData.user_id,
+        content: `Ваша заявка на событие «${eventData.title}» одобрена!`,
+        link: `/event/${appData.event_id}`
+      });
+      
+      if (notifError) console.error("Ошибка создания уведомления:", notifError);
+    }
   }
   
   revalidatePath('/my-events');
@@ -96,19 +125,16 @@ export async function rejectApplication(applicationId: string) {
 
   if (!user) throw new Error('Не авторизован');
 
-  // 1. Получаем ID событий пользователя
+  // 1. Получаем ID событий организатора
   const { data: userEvents } = await supabase
     .from('events')
     .select('id')
     .eq('organizer_id', user.id);
 
-  if (!userEvents || userEvents.length === 0) {
-    throw new Error('У вас нет созданных событий');
-  }
-
+  if (!userEvents || userEvents.length === 0) throw new Error('У вас нет созданных событий');
   const eventIds = userEvents.map(e => e.id);
 
-  // 2. Обновляем статус
+  // 2. Обновляем статус заявки
   const { error } = await supabase
     .from('applications')
     .update({ status: 'rejected' })
@@ -118,6 +144,31 @@ export async function rejectApplication(applicationId: string) {
   if (error) {
     console.error("Ошибка обновления:", error);
     throw new Error('Не удалось отклонить заявку');
+  }
+
+  // 3. Получаем данные для уведомления
+  const { data: appData } = await supabase
+    .from('applications')
+    .select('user_id, event_id')
+    .eq('id', applicationId)
+    .single();
+
+  if (appData) {
+    const { data: eventData } = await supabase
+      .from('events')
+      .select('title')
+      .eq('id', appData.event_id)
+      .single();
+
+    if (eventData) {
+      const { error: notifError } = await supabase.from('notifications').insert({
+        user_id: appData.user_id,
+        content: `Ваша заявка на событие «${eventData.title}» отклонена.`,
+        link: `/event/${appData.event_id}`
+      });
+      
+      if (notifError) console.error("Ошибка создания уведомления:", notifError);
+    }
   }
   
   revalidatePath('/my-events');

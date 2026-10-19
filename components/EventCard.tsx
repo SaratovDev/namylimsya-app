@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Map from './Map';
 
 interface EventCardProps {
   id: string;
@@ -17,6 +18,10 @@ interface EventCardProps {
   organizerName: string;
   organizerRank: string;
   isFull?: boolean;
+  location: string;
+  lat?: number;
+  lng?: number;
+  hideLocation?: boolean;
 }
 
 export default function EventCard({
@@ -31,19 +36,24 @@ export default function EventCard({
   organizerName,
   organizerRank,
   isFull = false,
+  location,
+  lat,
+  lng,
+  hideLocation = false,
 }: EventCardProps) {
   const [user, setUser] = useState<any>(null);
   const [application, setApplication] = useState<any>(null);
+  const [activeAppsCount, setActiveAppsCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    // Проверяем авторизацию и наличие заявки
     const checkUserAndApplication = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
 
       if (user) {
+        // 1. Проверяем заявку на ЭТО событие
         const { data } = await supabase
           .from('applications')
           .select('status')
@@ -51,6 +61,15 @@ export default function EventCard({
           .eq('user_id', user.id)
           .maybeSingle();
         setApplication(data);
+
+        // 2. Считаем ВСЕ активные заявки пользователя
+        const { count } = await supabase
+          .from('applications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .in('status', ['pending', 'approved']);
+        
+        setActiveAppsCount(count || 0);
       }
     };
     checkUserAndApplication();
@@ -58,8 +77,12 @@ export default function EventCard({
 
   const handleApply = async () => {
     if (!user) {
-      // Если не залогинен, отправляем на страницу входа
       router.push('/login');
+      return;
+    }
+
+    if (activeAppsCount >= 3) {
+      alert('Вы достигли лимита в 3 активные заявки. Дождитесь подтверждения или отмените старую заявку.');
       return;
     }
 
@@ -70,6 +93,14 @@ export default function EventCard({
 
     if (!error) {
       setApplication({ status: 'pending' });
+      setActiveAppsCount(prev => prev + 1);
+      
+      // Уведомление организатору
+      await supabase.from('notifications').insert({
+        user_id: organizerId,
+        content: `На ваше событие «${title}» отправлена новая заявка!`,
+        link: `/my-events`
+      });
     } else {
       alert('Ошибка при подаче заявки');
       console.error(error);
@@ -82,12 +113,17 @@ export default function EventCard({
   let buttonDisabled = isFull || loading;
   let buttonClass = 'bg-brand-accent text-brand-accent-ink hover:bg-brand-text hover:text-brand-bg';
 
-  const isOrganizer = user?.id === organizerId; // <--- Проверка на организатора
+  const isOrganizer = user?.id === organizerId;
+  const isLimitReached = activeAppsCount >= 3 && !application;
 
   if (isOrganizer) {
     buttonText = 'Это ваше событие';
     buttonDisabled = true;
     buttonClass = 'bg-brand-surface text-brand-muted border-brand-muted cursor-default';
+  } else if (isLimitReached) {
+    buttonText = 'Лимит заявок (3)';
+    buttonDisabled = true;
+    buttonClass = 'bg-brand-bg text-brand-muted border-brand-muted cursor-not-allowed';
   } else if (application?.status === 'pending') {
     buttonText = 'Заявка отправлена';
     buttonDisabled = true;
@@ -118,12 +154,20 @@ export default function EventCard({
           {spots}
         </span>
       </div>
+
+      {/* НОВЫЙ БЛОК С МЕСТОМ */}
+      <div className="mb-3 flex items-center gap-2 text-[14px] font-bold text-brand-muted">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+        {hideLocation && !isOrganizer && application?.status !== 'approved' 
+          ? 'Место скрыто организатором' 
+          : location}
+      </div>
       
-<Link href={`/event/${id}`} className="block hover:text-brand-accent transition-colors">
-  <h2 className="text-2xl font-extrabold leading-tight mb-2">
-    {title}
-  </h2>
-</Link>
+      <Link href={`/event/${id}`} className="block hover:text-brand-accent transition-colors">
+        <h2 className="text-2xl font-extrabold leading-tight mb-2">
+          {title}
+        </h2>
+      </Link>
       
       <p className="text-[15px] text-brand-text mb-4 line-clamp-3">
         {description}
@@ -141,6 +185,7 @@ export default function EventCard({
         </span>
       </div>
 
+      {/* ЕДИНСТВЕННЫЙ БЛОК С КНОПКАМИ */}
       <div className="flex flex-wrap gap-3 border-t-2 border-dashed border-brand-line pt-4">
         <button 
           onClick={handleApply}
@@ -150,12 +195,39 @@ export default function EventCard({
           {buttonText}
         </button>
         
-        {application?.status === 'approved' && (
-          <button className="bg-brand-surface text-brand-text font-extrabold text-sm uppercase px-4 py-2.5 border-2 border-brand-line rounded-brand hover:bg-brand-bg transition-colors">
+        {(application || isOrganizer) && (
+          <Link 
+            href={`/event/${id}`}
+            className="bg-brand-surface text-brand-text font-extrabold text-sm uppercase px-4 py-2.5 border-2 border-brand-line rounded-brand hover:bg-brand-cat-soft transition-colors flex items-center justify-center"
+          >
             Чат события
-          </button>
+          </Link>
         )}
       </div>
+
+      {/* Блок с картой (аккордеон) */}
+      {lat && lng && (
+        <details className="mt-4 border-t-2 border-dashed border-brand-line pt-4">
+          <summary className="list-none cursor-pointer text-brand-accent font-extrabold text-sm uppercase hover:underline">
+            Показать на карте
+          </summary>
+          <div className="mt-3">
+            <Map 
+              lat={lat} 
+              lng={lng} 
+              title={title} 
+              hideExactLocation={hideLocation && !isOrganizer && application?.status !== 'approved'} 
+            />
+            
+            {hideLocation && !isOrganizer && application?.status !== 'approved' && (
+              <div className="mt-2 p-3 bg-brand-heat/20 border-2 border-brand-heat rounded-brand text-brand-text font-bold text-xs">
+                Точное место откроется после подтверждения заявки.
+              </div>
+            )}
+          </div>
+        </details>
+      )}
+      
     </article>
   );
 }

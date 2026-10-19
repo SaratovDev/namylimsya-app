@@ -2,7 +2,6 @@ import { createClient } from '@/lib/supabase-server';
 import { notFound } from 'next/navigation';
 import Map from '@/components/MapComponent';
 import Link from 'next/link';
-import ApplicationActions from '@/components/ApplicationActions'; // Если нужно одобрять прямо тут
 import EventChat from '@/components/EventChat';
 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
@@ -34,6 +33,8 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 
   const isOrganizer = user?.id === event.organizer_id;
   const isApproved = application?.status === 'approved';
+  const hasPendingApplication = application?.status === 'pending';
+  const canAccessChat = isOrganizer || isApproved || hasPendingApplication;
   const canSeeExactLocation = !event.hide_location || isOrganizer || isApproved;
 
   return (
@@ -76,6 +77,8 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         <p className="font-bold text-brand-muted mb-4">{event.location}</p>
         
         <Map 
+          lat={event.lat || 55.751244} 
+          lng={event.lng || 37.618423} 
           title={event.title} 
           hideExactLocation={!canSeeExactLocation} 
         />
@@ -97,7 +100,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         {/* Действия (если это участник) */}
 
         {/* Блок чата (доступен только организатору и подтвержденным) */}
-        {(isOrganizer || isApproved) && user && (
+              {canAccessChat && user && (
           <div className="mt-10 border-t-2 border-dashed border-brand-line pt-8">
             <h2 className="text-xl font-extrabold mb-4">Обсуждение</h2>
             <EventChat eventId={event.id} currentUserId={user.id} />

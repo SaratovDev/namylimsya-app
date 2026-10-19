@@ -5,15 +5,22 @@ import { createEvent } from '@/app/actions';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import MapPicker from './MapPicker';
+import { User } from '@supabase/supabase-js';
 
 export default function CreateEventForm() {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, setIsPending] = useState(false);
-  const [user, setUser] = useState<any>(null);
+ const [user, setUser] = useState<User | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  
+  // Стейты для карты (ВНУТРИ компонента!)
+  const [lat, setLat] = useState<number | null>(null);
+  const [lng, setLng] = useState<number | null>(null);
+  const [location, setLocation] = useState('');
+  
   const router = useRouter();
 
-  // Проверяем авторизацию при загрузке формы
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);
@@ -26,11 +33,15 @@ export default function CreateEventForm() {
     try {
       await createEvent(formData);
       formRef.current?.reset();
+      setLocation(''); // Сбрасываем поле адреса после отправки
+      setLat(null);
+      setLng(null);
       alert('Событие успешно создано!');
       formRef.current?.closest('details')?.removeAttribute('open');
-      router.refresh(); // Обновляем страницу, чтобы событие сразу появилось в ленте
-    } catch (error: any) {
-      alert(error.message || 'Ошибка при создании события');
+      router.refresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Ошибка при создании события';
+      alert(message);
     } finally {
       setIsPending(false);
     }
@@ -40,7 +51,6 @@ export default function CreateEventForm() {
     return <div className="p-4 text-center font-bold text-brand-muted">Проверка авторизации...</div>;
   }
 
-  // Если пользователь не залогинен, показываем заглушку с кнопкой входа
   if (!user) {
     return (
       <div className="flex flex-col items-center gap-4 py-8 text-center">
@@ -71,7 +81,7 @@ export default function CreateEventForm() {
             <option>Обучение и лекции</option>
             <option>Поездки</option>
             <option>Помощь и волонтёрство</option>
-            <option>Просто встретиться / «здесь и сейчас»</option>
+            <option>Просто встретиться / здесь и сейчас</option>
           </select>
         </div>
         <div className="flex flex-col gap-1.5">
@@ -97,8 +107,29 @@ export default function CreateEventForm() {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <label className="text-[12px] font-extrabold uppercase text-brand-muted">Место</label>
-        <input required name="location" type="text" placeholder="Например: Парк Горького" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" />
+        <label className="text-[12px] font-extrabold uppercase text-brand-muted">Место (кликните на карту)</label>
+        <input 
+          required 
+          name="location" 
+          type="text" 
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          placeholder="Например: Парк Горького" 
+          className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+        />
+        
+        <input type="hidden" name="lat" value={lat || ''} />
+        <input type="hidden" name="lng" value={lng || ''} />
+
+        <div className="mt-2">
+        <MapPicker 
+          onLocationSelect={(selectedLat: number, selectedLng: number, address: string) => {
+            setLat(selectedLat);
+            setLng(selectedLng);
+            setLocation(address);
+          }} 
+        />
+        </div>
       </div>
 
       <label className="flex items-center gap-2.5 cursor-pointer mt-2">
