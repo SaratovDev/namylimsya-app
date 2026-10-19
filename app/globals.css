@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&display=swap');
 @import "tailwindcss";
+@import 'leaflet/dist/leaflet.css';
 
 @theme {
   --color-brand-bg: #EAE6D7;

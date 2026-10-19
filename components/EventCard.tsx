@@ -119,9 +119,11 @@ export default function EventCard({
         </span>
       </div>
       
-      <h2 className="text-2xl font-extrabold leading-tight mb-2">
-        {title}
-      </h2>
+<Link href={`/event/${id}`} className="block hover:text-brand-accent transition-colors">
+  <h2 className="text-2xl font-extrabold leading-tight mb-2">
+    {title}
+  </h2>
+</Link>
       
       <p className="text-[15px] text-brand-text mb-4 line-clamp-3">
         {description}
