@@ -76,12 +76,18 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         <h2 className="text-xl font-extrabold mb-2">Место встречи</h2>
         <p className="font-bold text-brand-muted mb-4">{event.location}</p>
         
-        <Map 
-          lat={event.lat || 55.751244} 
-          lng={event.lng || 37.618423} 
-          title={event.title} 
-          hideExactLocation={!canSeeExactLocation} 
-        />
+               {event.lat && event.lng ? (
+          <Map 
+            lat={event.lat} 
+            lng={event.lng} 
+            title={event.title} 
+            hideExactLocation={!canSeeExactLocation} 
+          />
+        ) : (
+          <div className="p-4 bg-brand-bg rounded-brand">
+            <p className="font-bold text-brand-muted text-sm">Организатор не указал точку на карте.</p>
+          </div>
+        )}
 
         {!canSeeExactLocation && (
           <div className="mt-4 p-4 bg-brand-heat/20 border-2 border-brand-heat rounded-brand text-brand-text font-bold text-sm">
@@ -89,13 +95,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           </div>
         )}
 
-        {/* Действия (если это организатор) */}
-        {isOrganizer && (
-          <div className="mt-8 p-4 bg-brand-bg border-2 border-brand-line rounded-brand">
-            <p className="font-extrabold mb-2">Вы организатор этого события.</p>
-            <Link href="/my-events" className="text-brand-accent font-bold underline">Перейти в кабинет для управления заявками</Link>
-          </div>
-        )}
+     
 
         {/* Действия (если это участник) */}
 

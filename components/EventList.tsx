@@ -27,7 +27,7 @@ export default async function EventList() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+     <div className="flex flex-col gap-6 items-center w-full">
       {events.map((event) => (
         <EventCard 
           key={event.id} 

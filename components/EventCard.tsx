@@ -53,7 +53,6 @@ export default function EventCard({
       setUser(user);
 
       if (user) {
-        // 1. Проверяем заявку на ЭТО событие
         const { data } = await supabase
           .from('applications')
           .select('status')
@@ -62,7 +61,6 @@ export default function EventCard({
           .maybeSingle();
         setApplication(data);
 
-        // 2. Считаем ВСЕ активные заявки пользователя
         const { count } = await supabase
           .from('applications')
           .select('*', { count: 'exact', head: true })
@@ -95,7 +93,6 @@ export default function EventCard({
       setApplication({ status: 'pending' });
       setActiveAppsCount(prev => prev + 1);
       
-      // Уведомление организатору
       await supabase.from('notifications').insert({
         user_id: organizerId,
         content: `На ваше событие «${title}» отправлена новая заявка!`,
@@ -138,96 +135,126 @@ export default function EventCard({
     buttonClass = 'bg-brand-bg text-brand-muted border-brand-muted cursor-not-allowed';
   }
 
+  // Разбиваем строку даты для левой колонки
+  // Ожидаем формат: "сб, 17 октября · 12:32"
+  const dateParts = date.split(' · ');
+  const dateOnly = dateParts[0] || date;
+  const timeOnly = dateParts[1] || '';
+  
+  // Извлекаем число и месяц
+  const dateMatch = dateOnly.match(/(\d+)\s+([а-яА-Я]+)/);
+  const dayNumber = dateMatch ? dateMatch[1] : '—';
+  const monthName = dateMatch ? dateMatch[2].slice(0, 3) : '—';
+
   return (
-    <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5">
-      <div className="flex flex-wrap items-center gap-3 mb-3">
-        <span className="text-[12px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2.5 py-1 rounded border border-brand-cat">
-          {category}
-        </span>
-        <div className="text-[15px] font-extrabold flex items-center gap-2">
-          {date}
-          <span className="text-[12px] font-extrabold text-brand-accent-ink bg-brand-accent px-2 py-0.5 rounded">
+   <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg flex flex-col sm:flex-row overflow-hidden hover:opacity-95 transition-opacity w-full max-w-[780px] mx-auto lg:mx-0">
+      
+      {/* ЛЕВАЯ КОЛОНКА: ДАТА */}
+      <div className="bg-brand-bg/50 p-5 sm:w-[140px] flex-shrink-0 flex flex-row sm:flex-col justify-between sm:justify-center items-center sm:items-start border-b-2 sm:border-b-0 sm:border-r-2 border-brand-line gap-2">
+        <div className="flex flex-row sm:flex-col items-center sm:items-start gap-2 sm:gap-0">
+          <span className="text-4xl font-extrabold leading-none text-brand-text">{dayNumber}</span>
+          <span className="text-sm font-bold text-brand-muted uppercase sm:mt-1">{monthName}</span>
+        </div>
+        
+        <div className="flex flex-col items-end sm:items-start sm:mt-3">
+          {timeOnly && <span className="text-sm font-extrabold text-brand-text">{timeOnly}</span>}
+          <span className="text-[10px] font-extrabold bg-brand-accent text-brand-accent-ink px-2 py-0.5 rounded mt-1 uppercase">
             {countdown}
           </span>
         </div>
-        <span className={`ml-auto text-[13px] font-extrabold px-2.5 py-1 rounded border-2 border-brand-line ${isFull ? 'text-brand-muted bg-brand-bg line-through' : 'bg-brand-bg'}`}>
-          {spots}
-        </span>
       </div>
 
-      {/* НОВЫЙ БЛОК С МЕСТОМ */}
-      <div className="mb-3 flex items-center gap-2 text-[14px] font-bold text-brand-muted">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-        {hideLocation && !isOrganizer && application?.status !== 'approved' 
-          ? 'Место скрыто организатором' 
-          : location}
-      </div>
-      
-      <Link href={`/event/${id}`} className="block hover:text-brand-accent transition-colors">
-        <h2 className="text-2xl font-extrabold leading-tight mb-2">
-          {title}
-        </h2>
-      </Link>
-      
-      <p className="text-[15px] text-brand-text mb-4 line-clamp-3">
-        {description}
-      </p>
+      {/* ПРАВАЯ КОЛОНКА: КОНТЕНТ */}
+      <div className="p-5 flex-grow flex flex-col min-w-0">
+        
+        {/* Верхняя строка: Категория и Места */}
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <span className="text-[11px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-0.5 rounded border border-brand-cat/30">
+            {category}
+          </span>
+          <span className={`ml-auto text-[12px] font-extrabold px-2 py-0.5 rounded border border-brand-line/30 ${isFull ? 'text-brand-muted bg-brand-bg line-through' : 'bg-brand-bg'}`}>
+            {spots}
+          </span>
+        </div>
 
-      <div className="flex items-center gap-2.5 text-sm text-brand-muted mb-4">
-        <span className="w-8 h-8 flex items-center justify-center rounded-full bg-brand-cat-soft text-brand-cat border-2 border-brand-cat font-extrabold text-sm uppercase">
-          {organizerName.charAt(0)}
-        </span>
-        <span>
+        {/* Заголовок */}
+        <Link href={`/event/${id}`} className="block hover:text-brand-accent transition-colors mb-1">
+          <h2 className="text-xl md:text-2xl font-extrabold leading-tight">
+            {title}
+          </h2>
+        </Link>
+
+        {/* Место */}
+        <div className="flex items-center gap-1.5 text-[13px] font-bold text-brand-muted mb-3">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+          <span className="truncate">
+            {hideLocation && !isOrganizer && application?.status !== 'approved' 
+              ? 'Место скрыто организатором' 
+              : location}
+          </span>
+        </div>
+
+        {/* Описание */}
+        <p className="text-[14px] text-brand-text/80 mb-4 line-clamp-2 leading-relaxed">
+          {description}
+        </p>
+
+        {/* Организатор */}
+        <div className="flex items-center gap-2 text-sm mb-5 mt-auto">
+          <span className="w-6 h-6 flex items-center justify-center rounded-full bg-brand-cat-soft text-brand-cat border border-brand-cat font-extrabold text-[10px] uppercase">
+            {organizerName.charAt(0)}
+          </span>
           <Link href={`/@${organizerName}`} className="text-brand-text hover:text-brand-accent transition-colors font-bold">
             {organizerName}
           </Link> 
-          · <span className="text-brand-accent font-extrabold">{organizerRank}</span>
-        </span>
-      </div>
+          <span className="text-brand-accent font-extrabold text-[11px] uppercase">{organizerRank}</span>
+        </div>
 
-      {/* ЕДИНСТВЕННЫЙ БЛОК С КНОПКАМИ */}
-      <div className="flex flex-wrap gap-3 border-t-2 border-dashed border-brand-line pt-4">
-        <button 
-          onClick={handleApply}
-          disabled={buttonDisabled}
-          className={`flex-1 font-extrabold text-sm uppercase px-4 py-2.5 border-2 border-brand-line rounded-brand transition-colors ${buttonClass}`}
-        >
-          {buttonText}
-        </button>
-        
-        {(application || isOrganizer) && (
-          <Link 
-            href={`/event/${id}`}
-            className="bg-brand-surface text-brand-text font-extrabold text-sm uppercase px-4 py-2.5 border-2 border-brand-line rounded-brand hover:bg-brand-cat-soft transition-colors flex items-center justify-center"
+        {/* Кнопки */}
+        <div className="flex flex-wrap gap-2 mt-auto">
+          <button 
+            onClick={handleApply}
+            disabled={buttonDisabled}
+            className={`flex-1 font-extrabold text-[13px] uppercase px-4 py-2 border-2 border-brand-line rounded-brand transition-colors ${buttonClass}`}
           >
-            Чат события
-          </Link>
-        )}
-      </div>
+            {buttonText}
+          </button>
+          
+          {(application || isOrganizer) && (
+            <Link 
+              href={`/event/${id}`}
+              className="bg-brand-surface text-brand-text font-extrabold text-[13px] uppercase px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-cat-soft transition-colors flex items-center justify-center"
+            >
+              Чат события
+            </Link>
+          )}
+        </div>
 
-      {/* Блок с картой (аккордеон) */}
-      {lat && lng && (
-        <details className="mt-4 border-t-2 border-dashed border-brand-line pt-4">
-          <summary className="list-none cursor-pointer text-brand-accent font-extrabold text-sm uppercase hover:underline">
-            Показать на карте
-          </summary>
-          <div className="mt-3">
-            <Map 
-              lat={lat} 
-              lng={lng} 
-              title={title} 
-              hideExactLocation={hideLocation && !isOrganizer && application?.status !== 'approved'} 
-            />
-            
-            {hideLocation && !isOrganizer && application?.status !== 'approved' && (
-              <div className="mt-2 p-3 bg-brand-heat/20 border-2 border-brand-heat rounded-brand text-brand-text font-bold text-xs">
-                Точное место откроется после подтверждения заявки.
-              </div>
-            )}
-          </div>
-        </details>
-      )}
-      
+        {/* Карта (если есть координаты) */}
+        {lat && lng && (
+          <details className="mt-4 border-t border-dashed border-brand-line/30 pt-3">
+            <summary className="list-none cursor-pointer text-brand-muted hover:text-brand-accent font-bold text-[12px] uppercase transition-colors flex items-center gap-1">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon></svg>
+              Показать на карте
+            </summary>
+            <div className="mt-3">
+              <Map 
+                lat={lat} 
+                lng={lng} 
+                title={title} 
+                hideExactLocation={hideLocation && !isOrganizer && application?.status !== 'approved'} 
+              />
+              
+              {hideLocation && !isOrganizer && application?.status !== 'approved' && (
+                <div className="mt-2 p-2 bg-brand-heat/10 border border-brand-heat rounded-brand text-brand-text font-bold text-[11px]">
+                  Точное место откроется после подтверждения заявки.
+                </div>
+              )}
+            </div>
+          </details>
+        )}
+        
+      </div>
     </article>
   );
 }

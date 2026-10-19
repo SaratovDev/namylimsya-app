@@ -73,7 +73,7 @@ export default function Header() {
   return (
     <>
       <header className="sticky top-0 z-50 bg-brand-bg border-b-2 border-brand-line">
-        <div className="max-w-[1280px] mx-auto flex items-center justify-between px-4 md:px-6 py-3">
+        <div className="max-w-[1100px] mx-auto flex items-center justify-between px-4 md:px-6 py-3">
           <Link href="/" className="font-extrabold text-2xl tracking-tighter uppercase z-50">
             Намылимся<span className="text-brand-accent">.</span>
           </Link>

@@ -21,7 +21,7 @@ function EventSkeleton() {
 
 export default function Home() {
   return (
-    <main className="max-w-[1280px] mx-auto grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-8 items-start mt-6 px-4 md:px-6 pb-12 relative">
+    <main className="max-w-[1100px] mx-auto grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-8 items-start mt-6 px-4 md:px-6 pb-12 relative">
       
       <div className="flex flex-col gap-6">
         
