@@ -1,8 +1,8 @@
 'use client';
 
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import L from 'leaflet';
 
 const icon = L.icon({
@@ -43,11 +43,50 @@ function LocationMarker({ onLocationSelect }: MapPickerProps) {
   );
 }
 
+// Вспомогательный компонент для программного перемещения карты
+function ChangeView({ center }: { center: [number, number] }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, map.getZoom());
+  }, [center, map]);
+  return null;
+}
+
 export default function MapPickerComponent({ onLocationSelect }: MapPickerProps) {
+  // Начальный центр (по умолчанию Москва)
+  const [center, setCenter] = useState<[number, number]>([55.751244, 37.618423]);
+  const [isLocating, setIsLocating] = useState(true);
+
+  useEffect(() => {
+    // Запрашиваем геолокацию при загрузке карты
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setCenter([position.coords.latitude, position.coords.longitude]);
+          setIsLocating(false);
+        },
+        (error) => {
+          console.warn("Пользователь отклонил геолокацию или произошла ошибка:", error);
+          setIsLocating(false); // Оставляем Москву по умолчанию
+        }
+      );
+    } else {
+      setIsLocating(false);
+    }
+  }, []);
+
   return (
-    <div className="h-64 w-full border-2 border-brand-line rounded-brand overflow-hidden relative z-0">
+    <div className="relative h-64 w-full border-2 border-brand-line rounded-brand overflow-hidden z-0">
+      
+      {/* Индикатор загрузки геолокации */}
+      {isLocating && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1000] bg-brand-surface border-2 border-brand-line px-3 py-1 rounded-full text-xs font-bold animate-pulse shadow-md">
+          Определяем ваше местоположение...
+        </div>
+      )}
+
       <MapContainer 
-        center={[55.751244, 37.618423]} 
+        center={center} 
         zoom={11} 
         scrollWheelZoom={true} 
         style={{ height: '100%', width: '100%' }}
@@ -56,6 +95,7 @@ export default function MapPickerComponent({ onLocationSelect }: MapPickerProps)
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <ChangeView center={center} />
         <LocationMarker onLocationSelect={onLocationSelect} />
       </MapContainer>
     </div>
