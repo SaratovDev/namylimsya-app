@@ -49,7 +49,7 @@ export default function EventCard({
           .select('status')
           .eq('event_id', id)
           .eq('user_id', user.id)
-          .single();
+          .maybeSingle();
         setApplication(data);
       }
     };

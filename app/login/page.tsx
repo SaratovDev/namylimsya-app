@@ -8,7 +8,7 @@ import Link from 'next/link';
 function LoginForm() {
   const searchParams = useSearchParams();
   const isRegisterMode = searchParams.get('mode') === 'register';
-  
+  const [gender, setGender] = useState('none');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
@@ -18,7 +18,11 @@ function LoginForm() {
   const router = useRouter();
 
   useEffect(() => {
-    setIsLogin(!isRegisterMode);
+    // Используем небольшую задержку, чтобы избежать синхронного обновления
+    const timer = setTimeout(() => {
+      setIsLogin(!isRegisterMode);
+    }, 0);
+    return () => clearTimeout(timer);
   }, [isRegisterMode]);
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -55,12 +59,15 @@ function LoginForm() {
         if (authError) throw authError;
 
         // 3. Если пользователь создался, обновляем его профиль (добавляем выбранный никнейм)
-        if (authData.user) {
+               if (authData.user) {
           const { error: profileError } = await supabase
             .from('profiles')
-            .update({ username: username })
+            .update({ 
+              username: username,
+              email: email,         // <-- сохраняем email
+              gender: gender        // <-- сохраняем пол
+            })
             .eq('id', authData.user.id);
-
           if (profileError) {
              console.error("Ошибка обновления профиля:", profileError);
              // Если никнейм не записался (например, из-за уникальности), 
@@ -73,8 +80,10 @@ function LoginForm() {
         setMessage('Регистрация успешна! Теперь вы можете войти.');
         setIsLogin(true);
       }
-    } catch (error: any) {
-      setMessage(error.message || 'Произошла ошибка');
+   } catch (error) {
+      // Безопасно извлекаем сообщение об ошибке
+      const errorMessage = error instanceof Error ? error.message : 'Произошла неизвестная ошибка';
+      setMessage(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -107,6 +116,17 @@ function LoginForm() {
               className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
             />
             <span className="text-[11px] text-brand-muted font-bold">Разрешены кириллица, латиница, цифры и _. Одинаковые запрещены.</span>
+          </div>
+        )}
+
+         {!isLogin && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш пол (необязательно)</label>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setGender('male')} className={`flex-1 py-2 font-bold border-2 border-brand-line rounded-brand ${gender === 'male' ? 'bg-brand-accent text-white' : 'bg-brand-bg'}`}>М</button>
+              <button type="button" onClick={() => setGender('female')} className={`flex-1 py-2 font-bold border-2 border-brand-line rounded-brand ${gender === 'female' ? 'bg-brand-accent text-white' : 'bg-brand-bg'}`}>Ж</button>
+              <button type="button" onClick={() => setGender('none')} className={`flex-1 py-2 font-bold border-2 border-brand-line rounded-brand ${gender === 'none' ? 'bg-brand-accent text-white' : 'bg-brand-bg'}`}>Другой</button>
+            </div>
           </div>
         )}
 

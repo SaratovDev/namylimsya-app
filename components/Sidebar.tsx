@@ -2,7 +2,7 @@ import React from 'react';
 
 export default function Sidebar() {
   return (
-    <aside className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5 sticky top-[90px] hidden lg:block">
+    <aside className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5">
       <h3 className="text-lg font-extrabold uppercase border-b-2 border-brand-line pb-2.5 mb-4">
         Фильтры
       </h3>
@@ -12,8 +12,13 @@ export default function Sidebar() {
         <div className="flex flex-wrap gap-2">
           <button className="bg-brand-cat text-white px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase transition-colors">Все</button>
           <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Прогулки</button>
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Спорт</button>
+          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Спорт и игры</button>
           <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Культура</button>
+          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Еда и напитки</button>
+          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Обучение</button>
+          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Поездки</button>
+          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Волонтёрство</button>
+          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Здесь и сейчас</button>
         </div>
       </div>
 
