@@ -72,7 +72,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
               organizerId={event.organizer_id}
               category={event.category}
               date={new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })}
-              countdown="Скоро"
+              dateTime={event.date_time}
               spots={event.is_full ? 'Мест нет' : `Осталось: ${event.max_participants}`}
               title={event.title}
               description={event.description}
