@@ -35,7 +35,7 @@ export default async function EventList() {
           organizerId={event.organizer_id} 
           category={event.category} 
           date={formatDate(event.date_time)} 
-          countdown="Скоро" 
+          dateTime={event.date_time}
           spots={event.is_full ? 'Мест нет' : `Осталось: ${event.max_participants}`} 
           title={event.title} 
           description={event.description} 

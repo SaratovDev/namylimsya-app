@@ -43,7 +43,6 @@ function LocationMarker({ onLocationSelect }: MapPickerProps) {
   );
 }
 
-// Вспомогательный компонент для программного перемещения карты
 function ChangeView({ center }: { center: [number, number] }) {
   const map = useMap();
   useEffect(() => {
@@ -53,51 +52,80 @@ function ChangeView({ center }: { center: [number, number] }) {
 }
 
 export default function MapPickerComponent({ onLocationSelect }: MapPickerProps) {
-  // Начальный центр (по умолчанию Москва)
-  const [center, setCenter] = useState<[number, number]>([55.751244, 37.618423]);
-  const [isLocating, setIsLocating] = useState(true);
+  const [center, setCenter] = useState<[number, number]>([55.751244, 37.618423]); // Москва по умолчанию
+  const [isLocating, setIsLocating] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Запрашиваем геолокацию при загрузке карты
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setCenter([position.coords.latitude, position.coords.longitude]);
-          setIsLocating(false);
-        },
-        (error) => {
-          console.warn("Пользователь отклонил геолокацию или произошла ошибка:", error);
-          setIsLocating(false); // Оставляем Москву по умолчанию
-        }
-      );
-    } else {
+  const requestGeolocation = () => {
+    setIsLocating(true);
+    setGeoError(null);
+
+    if (!("geolocation" in navigator)) {
+      setGeoError("Ваш браузер не поддерживает геолокацию.");
       setIsLocating(false);
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCenter([position.coords.latitude, position.coords.longitude]);
+        setIsLocating(false);
+      },
+      (error) => {
+        console.warn("Ошибка геолокации:", error);
+        if (error.code === error.PERMISSION_DENIED) {
+          setGeoError("Вы заблокировали доступ к геопозиции. Разрешите его в настройках браузера (иконка замка в адресной строке), чтобы карта центрировалась на вас.");
+        } else {
+          setGeoError("Не удалось определить местоположение. Попробуйте еще раз.");
+        }
+        setIsLocating(false);
+      }
+    );
+  };
+
+  // Запрашиваем при первой загрузке
+  useEffect(() => {
+    requestGeolocation();
   }, []);
 
   return (
-    <div className="relative h-64 w-full border-2 border-brand-line rounded-brand overflow-hidden z-0">
+    <div className="relative flex flex-col gap-2">
       
-      {/* Индикатор загрузки геолокации */}
-      {isLocating && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1000] bg-brand-surface border-2 border-brand-line px-3 py-1 rounded-full text-xs font-bold animate-pulse shadow-md">
-          Определяем ваше местоположение...
+      {/* Панель управления над картой */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button 
+          type="button"
+          onClick={requestGeolocation}
+          disabled={isLocating}
+          className="bg-brand-surface border-2 border-brand-line text-brand-text font-extrabold text-xs uppercase px-3 py-1.5 rounded-brand hover:bg-brand-cat-soft transition-colors flex items-center gap-2 disabled:opacity-50"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg>
+          {isLocating ? 'Определяем...' : 'Моё местоположение'}
+        </button>
+      </div>
+
+      {/* Сообщение об ошибке */}
+      {geoError && (
+        <div className="bg-brand-heat/10 border-2 border-brand-heat p-2 rounded-brand text-[11px] font-bold text-brand-text">
+          {geoError}
         </div>
       )}
 
-      <MapContainer 
-        center={center} 
-        zoom={11} 
-        scrollWheelZoom={true} 
-        style={{ height: '100%', width: '100%' }}
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        <ChangeView center={center} />
-        <LocationMarker onLocationSelect={onLocationSelect} />
-      </MapContainer>
+      <div className="h-64 w-full border-2 border-brand-line rounded-brand overflow-hidden relative z-0">
+        <MapContainer 
+          center={center} 
+          zoom={11} 
+          scrollWheelZoom={true} 
+          style={{ height: '100%', width: '100%' }}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <ChangeView center={center} />
+          <LocationMarker onLocationSelect={onLocationSelect} />
+        </MapContainer>
+      </div>
     </div>
   );
 }

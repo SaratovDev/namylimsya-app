@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import Map from '@/components/MapComponent';
 import Link from 'next/link';
 import EventChat from '@/components/EventChat';
+import Countdown from '@/components/Countdown';
 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -49,11 +50,16 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         
         {/* Заголовок и категория */}
         <div className="flex flex-wrap items-center gap-3 mb-4">
+          
           <span className="text-[12px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2.5 py-1 rounded border border-brand-cat">
             {event.category}
           </span>
           <span className="text-[14px] font-extrabold bg-brand-bg px-3 py-1 rounded border-2 border-brand-line">
             {new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })} в {new Date(event.date_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+            <span className="text-[14px] font-extrabold bg-brand-bg px-3 py-1 rounded border-2 border-brand-line flex items-center gap-2">
+            {new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })} в {new Date(event.date_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+            <Countdown targetDate={event.date_time} />
           </span>
         </div>
 

@@ -5,13 +5,14 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Map from './Map';
+import Countdown from './Countdown';
 
 interface EventCardProps {
   id: string;
   organizerId: string;
   category: string;
   date: string;
-  countdown: string;
+  dateTime: string;
   spots: string;
   title: string;
   description: string;
@@ -29,7 +30,7 @@ export default function EventCard({
   organizerId,
   category,
   date,
-  countdown,
+  dateTime,
   spots,
   title,
   description,
@@ -158,9 +159,7 @@ export default function EventCard({
         
         <div className="flex flex-col items-end sm:items-start sm:mt-3">
           {timeOnly && <span className="text-sm font-extrabold text-brand-text">{timeOnly}</span>}
-          <span className="text-[10px] font-extrabold bg-brand-accent text-brand-accent-ink px-2 py-0.5 rounded mt-1 uppercase">
-            {countdown}
-          </span>
+          <Countdown targetDate={dateTime} />
         </div>
       </div>
 

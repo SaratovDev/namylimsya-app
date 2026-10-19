@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import EventCard from '@/components/EventCard';
 import Link from 'next/link';
 
+
 export default async function ProfilePage({ params }: { params: Promise<{ username: string }> }) {
   const { username } = await params;
   const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
