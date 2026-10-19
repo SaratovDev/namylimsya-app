@@ -66,23 +66,23 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
         ) : (
           events.map((event) => (
              <EventCard 
-  key={event.id}
-  id={event.id}
-  organizerId={event.organizer_id}
-  category={event.category}
-  date={new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })}
-  countdown="Скоро"
-  spots={event.is_full ? 'Мест нет' : `Осталось: ${event.max_participants}`}
-  title={event.title}
-  description={event.description}
-  organizerName={event.organizer_name}
-  organizerRank={event.organizer_rank}
-  isFull={event.is_full}
-  location={event.location}       {/* <--- ДОБАВИЛИ */}
-  lat={event.lat}                 {/* <--- ДОБАВИЛИ */}
-  lng={event.lng}                 {/* <--- ДОБАВИЛИ */}
-  hideLocation={event.hide_location} {/* <--- ДОБАВИЛИ */}
-/>
+              key={event.id}
+              id={event.id}
+              organizerId={event.organizer_id}
+              category={event.category}
+              date={new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })}
+              countdown="Скоро"
+              spots={event.is_full ? 'Мест нет' : `Осталось: ${event.max_participants}`}
+              title={event.title}
+              description={event.description}
+              organizerName={event.organizer_name}
+              organizerRank={event.organizer_rank}
+              isFull={event.is_full}
+              location={event.location}
+              lat={event.lat}
+              lng={event.lng}
+              hideLocation={event.hide_location}
+            />
           ))
         )}
       </div>
