@@ -11,7 +11,7 @@ export default function ApplicationActions({ applicationId }: { applicationId: s
     try {
       await approveApplication(applicationId);
     } catch (error) {
-      console.error("Ошибка при подтверждении:", error); // <--- ВЫВОД В КОНСОЛЬ
+      console.error("Ошибка при подтверждении:", error);
       alert('Ошибка при подтверждении. Проверьте консоль.');
     } finally {
       setIsLoading(false);
@@ -25,7 +25,7 @@ export default function ApplicationActions({ applicationId }: { applicationId: s
     try {
       await rejectApplication(applicationId);
     } catch (error) {
-      console.error("Ошибка при отклонении:", error); // <--- ВЫВОД В КОНСОЛЬ
+      console.error("Ошибка при отклонении:", error);
       alert('Ошибка при отклонении. Проверьте консоль.');
     } finally {
       setIsLoading(false);
@@ -33,20 +33,22 @@ export default function ApplicationActions({ applicationId }: { applicationId: s
   };
 
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-1.5 flex-shrink-0 ml-2">
       <button 
         onClick={handleApprove}
         disabled={isLoading}
-        className="bg-green-600 text-white px-3 py-1 text-xs font-bold uppercase rounded border-2 border-green-800 hover:bg-green-700 transition-colors disabled:opacity-50"
+        className="w-8 h-8 flex items-center justify-center bg-green-100 text-green-700 border-2 border-green-600 rounded-brand hover:bg-green-600 hover:text-white transition-colors disabled:opacity-50"
+        title="Принять"
       >
-        {isLoading ? '...' : 'Принять'}
+        {isLoading ? '...' : '✓'}
       </button>
       <button 
         onClick={handleReject}
         disabled={isLoading}
-        className="bg-red-500 text-white px-3 py-1 text-xs font-bold uppercase rounded border-2 border-red-700 hover:bg-red-600 transition-colors disabled:opacity-50"
+        className="w-8 h-8 flex items-center justify-center bg-red-100 text-red-700 border-2 border-red-600 rounded-brand hover:bg-red-600 hover:text-white transition-colors disabled:opacity-50"
+        title="Отклонить"
       >
-        {isLoading ? '...' : 'Отклонить'}
+        {isLoading ? '...' : '✕'}
       </button>
     </div>
   );

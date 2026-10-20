@@ -7,6 +7,24 @@ import { useRouter, usePathname } from 'next/navigation';
 import { User } from '@supabase/supabase-js';
 import NotificationsBell from './NotificationsBell';
 
+// Вспомогательный компонент для пунктов навигации ПК
+function NavItem({ href, label, pathname }: { href: string, label: string, pathname: string }) {
+  const isActive = pathname === href;
+  return (
+    <Link 
+      href={href} 
+      className={`font-bold text-sm tracking-wider transition-all duration-200 flex items-center gap-1
+        ${isActive ? 'text-brand-accent' : 'text-brand-text hover:text-brand-accent'}
+      `}
+    >
+      <span className={`text-brand-accent transition-all duration-200 ${isActive ? 'opacity-100' : 'opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0'}`}>[</span>
+      <span>{label}</span>
+      <span className={`text-brand-accent transition-all duration-200 ${isActive ? 'opacity-100' : 'opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0'}`}>]</span>
+    </Link>
+  );
+}
+
+
 export default function Header() {
   const [user, setUser] = useState<User | null>(null);
   const [username, setUsername] = useState<string | null>(null);
@@ -15,8 +33,11 @@ export default function Header() {
   const pathname = usePathname();
 
   useEffect(() => {
-    // Закрываем меню при смене страницы
-    setIsMobileMenuOpen(false);
+    // Закрываем меню при смене страницы (с задержкой, чтобы избежать синхронного setState)
+    const timer = setTimeout(() => {
+      setIsMobileMenuOpen(false);
+    }, 0);
+    return () => clearTimeout(timer);
   }, [pathname]);
 
   useEffect(() => {
@@ -42,7 +63,8 @@ export default function Header() {
           setUsername(data?.username || user.email?.split('@')[0] || 'Пользователь');
         });
     } else {
-      setUsername(null);
+      const timer = setTimeout(() => setUsername(null), 0);
+      return () => clearTimeout(timer);
     }
   }, [user]);
 
@@ -53,22 +75,7 @@ export default function Header() {
     setIsMobileMenuOpen(false);
   };
 
-  // Вспомогательный компонент для пунктов навигации ПК
-  const NavItem = ({ href, label }: { href: string, label: string }) => {
-    const isActive = pathname === href;
-    return (
-      <Link 
-        href={href} 
-        className={`font-bold text-sm tracking-wider transition-all duration-200 flex items-center gap-1
-          ${isActive ? 'text-brand-accent' : 'text-brand-text hover:text-brand-accent'}
-        `}
-      >
-        <span className={`text-brand-accent transition-all duration-200 ${isActive ? 'opacity-100' : 'opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0'}`}>[</span>
-        <span>{label}</span>
-        <span className={`text-brand-accent transition-all duration-200 ${isActive ? 'opacity-100' : 'opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0'}`}>]</span>
-      </Link>
-    );
-  };
+
 
   return (
     <>
@@ -81,13 +88,13 @@ export default function Header() {
           {/* Навигация для ПК */}
           <nav className="hidden md:flex gap-6">
             <div className="group flex items-center">
-              <NavItem href="/" label="Лента" />
+              <NavItem href="/" label="Лента" pathname={pathname} />
             </div>
             <div className="group flex items-center">
-              <NavItem href="/my-events" label="Мои события" />
+              <NavItem href="/my-events" label="Мои события" pathname={pathname} />
             </div>
             <div className="group flex items-center">
-              <NavItem href="/archive" label="Архив" />
+              <NavItem href="/archive" label="Архив" pathname={pathname} />
             </div>
           </nav>
 
@@ -117,6 +124,13 @@ export default function Header() {
                 </>
               )}
             </div>
+
+            {/* Колокольчик для мобилок */}
+            {user && (
+              <div className="md:hidden">
+                <NotificationsBell />
+              </div>
+            )}
 
             {/* Кнопка Гамбургер для мобилок */}
             <button 

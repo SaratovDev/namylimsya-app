@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Map from './Map';
 import Countdown from './Countdown';
+import { User } from '@supabase/supabase-js';
 
 interface EventCardProps {
   id: string;
@@ -29,7 +30,6 @@ export default function EventCard({
   id,
   organizerId,
   category,
-  date,
   dateTime,
   spots,
   title,
@@ -42,8 +42,8 @@ export default function EventCard({
   lng,
   hideLocation = false,
 }: EventCardProps) {
-  const [user, setUser] = useState<any>(null);
-  const [application, setApplication] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [application, setApplication] = useState<{ id: string; status: string } | null>(null);
   const [activeAppsCount, setActiveAppsCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -56,7 +56,7 @@ export default function EventCard({
       if (user) {
         const { data } = await supabase
           .from('applications')
-          .select('status')
+          .select('id, status')
           .eq('event_id', id)
           .eq('user_id', user.id)
           .maybeSingle();
@@ -86,12 +86,14 @@ export default function EventCard({
     }
 
     setLoading(true);
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('applications')
-      .insert([{ event_id: id, user_id: user.id, status: 'pending' }]);
+      .insert([{ event_id: id, user_id: user.id, status: 'pending' }])
+      .select('id, status')
+      .single();
 
-    if (!error) {
-      setApplication({ status: 'pending' });
+    if (!error && data) {
+      setApplication(data);
       setActiveAppsCount(prev => prev + 1);
       
       await supabase.from('notifications').insert({
@@ -105,6 +107,30 @@ export default function EventCard({
     }
     setLoading(false);
   };
+
+  const handleCancel = async () => {
+    if (!confirm('Вы уверены, что хотите отменить заявку?')) return;
+    if (!application?.id) return;
+
+    setIsCanceling(true);
+    try {
+      const { error } = await supabase
+        .from('applications')
+        .delete()
+        .eq('id', application.id);
+        
+      if (error) throw error;
+      
+      setApplication(null);
+      setActiveAppsCount(prev => prev - 1);
+    } catch {
+      alert('Не удалось отменить заявку');
+    } finally {
+      setIsCanceling(false);
+    }
+  };
+
+  const [isCanceling, setIsCanceling] = useState(false);
 
   // Логика отображения кнопки
   let buttonText = 'Хочу участвовать';
@@ -136,67 +162,43 @@ export default function EventCard({
     buttonClass = 'bg-brand-bg text-brand-muted border-brand-muted cursor-not-allowed';
   }
 
-  // Разбиваем строку даты для левой колонки
-  // Ожидаем формат: "сб, 17 октября · 12:32"
-  const dateParts = date.split(' · ');
-  const dateOnly = dateParts[0] || date;
-  const timeOnly = dateParts[1] || '';
-  
-  // Извлекаем число и месяц
-  const dateMatch = dateOnly.match(/(\d+)\s+([а-яА-Я]+)/);
-  const dayNumber = dateMatch ? dateMatch[1] : '—';
-  const monthName = dateMatch ? dateMatch[2].slice(0, 3) : '—';
+  // Форматируем дату для левой колонки
+  const d = new Date(dateTime);
+  const dayNumber = d.getDate();
+  const monthName = d.toLocaleDateString('ru-RU', { month: 'long' }); // "октября"
+  const timeOnly = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
   return (
-   <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg flex flex-col sm:flex-row overflow-hidden hover:opacity-95 transition-opacity w-full max-w-[780px] mx-auto lg:mx-0">
+    <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg flex flex-col sm:flex-row overflow-hidden hover:opacity-95 transition-opacity w-full">
       
       {/* ЛЕВАЯ КОЛОНКА: ДАТА */}
-      <div className="bg-brand-bg/50 p-5 sm:w-[140px] flex-shrink-0 flex flex-row sm:flex-col justify-between sm:justify-center items-center sm:items-start border-b-2 sm:border-b-0 sm:border-r-2 border-brand-line gap-2">
-        <div className="flex flex-row sm:flex-col items-center sm:items-start gap-2 sm:gap-0">
-          <span className="text-4xl font-extrabold leading-none text-brand-text">{dayNumber}</span>
-          <span className="text-sm font-bold text-brand-muted uppercase sm:mt-1">{monthName}</span>
-        </div>
+<div className="bg-brand-bg/50 p-4 sm:w-[140px] flex-shrink-0 flex flex-row sm:flex-col justify-between sm:justify-center items-center sm:items-start border-b-2 sm:border-b-0 sm:border-r-2 border-brand-line gap-2 sm:gap-0">
+  <div className="flex flex-row sm:flex-col items-baseline sm:items-start gap-2 sm:gap-0">
+    <span className="text-4xl font-extrabold leading-none text-brand-text">{dayNumber}</span>
+    <span className="text-sm font-bold text-brand-muted sm:mt-1">{monthName}</span>
+  </div>
+
         
-        <div className="flex flex-col items-end sm:items-start sm:mt-3">
-          {timeOnly && <span className="text-sm font-extrabold text-brand-text">{timeOnly}</span>}
-          <Countdown targetDate={dateTime} />
+        <div className="flex flex-col items-end sm:items-start sm:mt-4">
+          <span className="text-sm font-extrabold text-brand-text">{timeOnly}</span>
+          <div className="mt-1">
+            <Countdown targetDate={dateTime} />
+          </div>
         </div>
       </div>
 
       {/* ПРАВАЯ КОЛОНКА: КОНТЕНТ */}
-      <div className="p-5 flex-grow flex flex-col min-w-0">
+      <div className="p-5 md:p-6 flex-grow flex flex-col min-w-0">
         
         {/* Верхняя строка: Категория и Места */}
-        <div className="flex flex-wrap items-center gap-2 mb-2">
-          <span className="text-[11px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-0.5 rounded border border-brand-cat/30">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4 sm:mb-4">
+          <span className="text-[11px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-0.5 rounded border border-brand-cat/30 w-fit">
             {category}
           </span>
-          <span className={`ml-auto text-[12px] font-extrabold px-2 py-0.5 rounded border border-brand-line/30 ${isFull ? 'text-brand-muted bg-brand-bg line-through' : 'bg-brand-bg'}`}>
-            {spots}
+          <span className={`sm:ml-auto text-[12px] font-extrabold px-2 py-0.5 rounded border border-brand-line/30 w-fit ${isFull ? 'text-brand-muted bg-brand-bg line-through' : 'bg-brand-bg'}`}>
+            {isFull ? 'Мест нет' : `Мест осталось: ${spots.replace('Осталось: ', '')}`}
           </span>
         </div>
-
-        {/* Заголовок */}
-        <Link href={`/event/${id}`} className="block hover:text-brand-accent transition-colors mb-1">
-          <h2 className="text-xl md:text-2xl font-extrabold leading-tight">
-            {title}
-          </h2>
-        </Link>
-
-        {/* Место */}
-        <div className="flex items-center gap-1.5 text-[13px] font-bold text-brand-muted mb-3">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-          <span className="truncate">
-            {hideLocation && !isOrganizer && application?.status !== 'approved' 
-              ? 'Место скрыто организатором' 
-              : location}
-          </span>
-        </div>
-
-        {/* Описание */}
-        <p className="text-[14px] text-brand-text/80 mb-4 line-clamp-2 leading-relaxed">
-          {description}
-        </p>
 
         {/* Организатор */}
         <div className="flex items-center gap-2 text-sm mb-5 mt-auto">
@@ -209,6 +211,42 @@ export default function EventCard({
           <span className="text-brand-accent font-extrabold text-[11px] uppercase">{organizerRank}</span>
         </div>
 
+
+        {/* Заголовок */}
+        <Link href={`/event/${id}`} className="block hover:text-brand-accent transition-colors mt-2">
+          <h2 className="text-xl md:text-2xl font-extrabold leading-tight">
+            {title}
+          </h2>
+        </Link>
+
+        {/* Место */}
+        <div className="flex items-center gap-1.5 text-[13px] font-medium text-brand-muted mt-2 mb-3">
+            <svg
+            width="32"
+            height="32"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+            <circle cx="12" cy="9" r="2.5" />
+          </svg>
+          <span className="truncate">
+            {hideLocation && !isOrganizer && application?.status !== 'approved' 
+              ? 'Место скрыто организатором' 
+              : location}
+          </span>
+        </div>
+
+        {/* Описание */}
+        <p className="text-[16px] text-brand-text/120 mb-4 line-clamp-2 leading-relaxed">
+          {description}
+        </p>
+
+        
         {/* Кнопки */}
         <div className="flex flex-wrap gap-2 mt-auto">
           <button 
@@ -226,6 +264,17 @@ export default function EventCard({
             >
               Чат события
             </Link>
+          )}
+          
+          {application?.status === 'pending' && (
+            <button 
+              onClick={handleCancel}
+              disabled={isCanceling}
+              className="bg-red-100 text-red-700 font-extrabold text-[13px] uppercase px-4 py-2 border-2 border-red-300 rounded-brand hover:bg-red-200 transition-colors disabled:opacity-50"
+              title="Отменить заявку"
+            >
+              ✕
+            </button>
           )}
         </div>
 

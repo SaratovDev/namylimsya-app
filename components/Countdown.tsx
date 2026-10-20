@@ -43,17 +43,15 @@ export default function Countdown({ targetDate }: { targetDate: string }) {
 
   if (isPast) {
     return (
-      <span className="text-[12px] font-extrabold text-brand-muted bg-brand-bg px-2 py-0.5 rounded border border-brand-line/30">
+      <span className="text-[12px] font-bold text-brand-muted">
         Событие началось
       </span>
     );
   }
 
   return (
-    <span className={`text-[12px] font-extrabold px-2 py-0.5 rounded transition-colors ${
-      isUrgent 
-        ? 'bg-red-500 text-white animate-pulse' // Красный, если меньше 4 часов
-        : 'bg-brand-accent text-brand-accent-ink' // Оранжевый по умолчанию
+    <span className={`text-[12px] font-bold transition-colors ${
+      isUrgent ? 'text-brand-accent' : 'text-brand-muted'
     }`}>
       {timeLeft}
     </span>
