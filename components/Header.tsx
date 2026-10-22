@@ -252,7 +252,16 @@ export default function Header() {
           </nav>
         )}
 
-        <div className="mt-auto mb-10 flex flex-col gap-4">
+              <div className="mt-auto mb-10 flex flex-col gap-4">
+          
+          {/* Кнопка смены темы для мобилок */}
+          <button 
+            onClick={toggleTheme}
+            className="animate-menu-item delay-3 bg-brand-surface text-brand-text font-extrabold text-lg p-3 border-2 border-brand-line rounded-brand flex items-center justify-center gap-2"
+          >
+            {theme === 'light' ? '🌙 Темная тема' : '☀️ Светлая тема'}
+          </button>
+
           {user ? (
             <>
               <Link href={`/@${username}`} className="animate-menu-item delay-4 text-xl font-bold text-center border-2 border-brand-line p-3 rounded-brand">
