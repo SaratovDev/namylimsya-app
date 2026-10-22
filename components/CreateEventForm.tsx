@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import MapPicker from './MapPicker';
 import { User } from '@supabase/supabase-js';
+import { useToast } from './Toast';
 
 export default function CreateEventForm() {
   const formRef = useRef<HTMLFormElement>(null);
@@ -20,6 +21,7 @@ export default function CreateEventForm() {
   const [location, setLocation] = useState('');
   
   const router = useRouter();
+  const { showSuccess, showError } = useToast();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -32,16 +34,23 @@ export default function CreateEventForm() {
     setIsPending(true);
     try {
       await createEvent(formData);
+      
+      // Сброс полей
       formRef.current?.reset();
-      setLocation(''); // Сбрасываем поле адреса после отправки
+      setLocation('');
       setLat(null);
       setLng(null);
-      alert('Событие успешно создано!');
+      
+      // Успешный тост
+      showSuccess('Событие успешно создано!');
+      
+      // Закрываем аккордеон
       formRef.current?.closest('details')?.removeAttribute('open');
       router.refresh();
     } catch (error) {
+      // Выводим точную ошибку (например, "Описание должно быть не короче 10 символов")
       const message = error instanceof Error ? error.message : 'Ошибка при создании события';
-      alert(message);
+      showError(message);
     } finally {
       setIsPending(false);
     }

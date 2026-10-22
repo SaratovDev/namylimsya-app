@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { markChatAsRead } from '@/app/actions';
 import Image from 'next/image';
+import { useToast } from './Toast';
 
 interface EventChatProps {
   eventId: string;
@@ -29,6 +30,8 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const { showSuccess, showError } = useToast();
+  
   
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -180,12 +183,12 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
 
     const now = Date.now();
     if (now - lastSendTime.current < 2000) {
-      alert('Подождите пару секунд перед отправкой.');
+      showError('Не так быстро! Подождите пару секунд.'); // <-- ЗАМЕНА
       return;
     }
     
     if (newMessage.length > MAX_MESSAGE_LENGTH) {
-      alert(`Сообщение слишком длинное (максимум ${MAX_MESSAGE_LENGTH}).`);
+      showError(`Сообщение слишком длинное (максимум ${MAX_MESSAGE_LENGTH} символов).`); // <-- ЗАМЕНА
       return;
     }
 
@@ -203,9 +206,11 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
 
       if (error) throw error;
       lastSendTime.current = Date.now();
+      // Мы не показываем тост об успехе для каждого сообщения, 
+      // чтобы не спамить (сообщение и так появляется в чате).
     } catch (error) {
       console.error(error);
-      alert('Ошибка отправки.');
+      showError('Не удалось отправить сообщение.'); // <-- ЗАМЕНА
       setNewMessage(content); 
     } finally {
       setSending(false);

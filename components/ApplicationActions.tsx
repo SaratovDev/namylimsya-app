@@ -2,16 +2,18 @@
 
 import { useState } from 'react';
 import { approveApplication, rejectApplication } from '@/app/actions';
+import { useToast } from './Toast';
 
 export default function ApplicationActions({ applicationId }: { applicationId: string }) {
   const [isLoading, setIsLoading] = useState(false);
-
-  const handleApprove = async () => {
+  const { showSuccess, showError } = useToast();
+   const handleApprove = async () => {
     setIsLoading(true);
     try {
       await approveApplication(applicationId);
+      showSuccess('Заявка подтверждена!'); // <-- Тост успеха
     } catch (error: any) {
-      alert(error.message);
+      showError(error.message || 'Ошибка при подтверждении'); // <-- Тост ошибки
     } finally {
       setIsLoading(false);
     }
@@ -23,13 +25,13 @@ export default function ApplicationActions({ applicationId }: { applicationId: s
     setIsLoading(true);
     try {
       await rejectApplication(applicationId);
+      showSuccess('Заявка отклонена'); // <-- Тост успеха
     } catch (error: any) {
-      alert(error.message);
+      showError(error.message || 'Ошибка при отклонении'); // <-- Тост ошибки
     } finally {
       setIsLoading(false);
     }
   };
-
   return (
     <div className="flex gap-1.5 flex-shrink-0 ml-2">
       <button 

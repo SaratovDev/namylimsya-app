@@ -8,6 +8,7 @@ import type { EventListItemDTO } from '@/lib/event-dto';
 import { applyToEvent, cancelApplication } from '@/app/actions';
 import type { User } from '@supabase/supabase-js';
 import ClientMapWrapper from './ClientMapWrapper';
+import { useToast } from './Toast';
 
 export default function EventCard({ item }: { item: EventListItemDTO }) {
   const {
@@ -49,14 +50,15 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
   const isActuallyOrganizer = isOrganizer || (user !== null && user.id === organizerId);
   const hasExactCoords = typeof lat === 'number' && typeof lng === 'number';
 
-  const handleApply = async () => {
+ const handleApply = async () => {
     setLoading(true);
     try {
       await applyToEvent(id);
       setMyStatus('pending');
+      showSuccess('Заявка отправлена! Ждите подтверждения.'); // <-- Тост успеха
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Произошла ошибка';
-      alert(message);
+      showError(message); // <-- Тост ошибки (выведет точную причину)
     } finally {
       setLoading(false);
     }
@@ -68,9 +70,10 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
     try {
       await cancelApplication(id);
       setMyStatus(null);
+      showSuccess('Заявка отменена'); // <-- Тост успеха
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Произошла ошибка';
-      alert(message);
+      showError(message); // <-- Тост ошибки
     } finally {
       setIsCanceling(false);
     }

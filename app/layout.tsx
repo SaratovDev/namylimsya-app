@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Header from "@/components/Header";
 import PageTransition from "@/components/PageTransition";
+import { ToastProvider } from "@/components/Toast";
 
 export const metadata: Metadata = {
   title: "Намылимся. — Лента",
@@ -33,6 +34,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen flex flex-col">
+        <ToastProvider>
         <Header />
         
         <PageTransition>
@@ -43,6 +45,7 @@ export default function RootLayout({
           <p>«Намылимся.» — площадка для живых встреч. Ответственность за проведение событий лежат на организаторах и участниках.</p>
           <p>16+ · Правила сообщества · Поддержка</p>
         </footer>
+        </ToastProvider>
       </body>
     </html>
   );
