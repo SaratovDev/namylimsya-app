@@ -34,6 +34,7 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
     organizerGender,
   } = item;
 
+  const { showSuccess, showError } = useToast();
   const [myStatus, setMyStatus] = useState<
     'pending' | 'approved' | 'rejected' | null
   >(myApplicationStatus);
