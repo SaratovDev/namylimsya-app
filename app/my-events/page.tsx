@@ -4,6 +4,23 @@ import { redirect } from 'next/navigation';
 import ApplicationActions from '@/components/ApplicationActions';
 import { getUnreadCounts } from '@/app/actions';
 
+// Явно описываем типы для TypeScript
+type EventType = {
+  id: string;
+  title: string;
+  date_time: string;
+  organizer_name: string;
+  max_participants: number;
+};
+
+type ApplicationType = {
+  id: string;
+  status: string;
+  event_id: string;
+  user_id: string;
+  profile?: { username: string } | null;
+};
+
 export default async function MyEventsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -15,30 +32,30 @@ export default async function MyEventsPage() {
     .from('events')
     .select('id, title, date_time, organizer_name, max_participants')
     .eq('organizer_id', user.id)
-    .order('date_time', { ascending: true });
+    .order('date_time', { ascending: true }) as { data: EventType[] | null };
 
   const eventIds = events?.map(e => e.id) || [];
 
-  // 2. Получаем заявки (БЕЗ JOIN, чтобы наверняка не сломаться)
+  // 2. Получаем заявки (БЕЗ JOIN)
   const { data: applications, error: appsError } = await supabase
     .from('applications')
     .select('id, status, event_id, user_id')
-    .in('event_id', eventIds);
+    .in('event_id', eventIds) as { data: ApplicationType[] | null, error: any };
 
   if (appsError) {
     console.error("КРИТИЧЕСКАЯ ОШИБКА загрузки заявок:", appsError);
   }
 
   // 3. Получаем профили для этих заявок
-  let applicationsWithProfiles: any[] = [];
+  let applicationsWithProfiles: ApplicationType[] = [];
   if (applications && applications.length > 0) {
     const userIds = [...new Set(applications.map(app => app.user_id))];
     const { data: profiles } = await supabase
       .from('profiles')
       .select('id, username')
-      .in('id', userIds);
+      .in('id', userIds) as { data: { id: string, username: string }[] | null };
 
-    // Сшиваем заявки с профилями вручную (это быстро и надежно)
+    // Сшиваем заявки с профилями
     applicationsWithProfiles = applications.map(app => ({
       ...app,
       profile: profiles?.find(p => p.id === app.user_id)
@@ -55,7 +72,7 @@ export default async function MyEventsPage() {
       events!fk_applications_event ( id, title, date_time, organizer_name )
     `)
     .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false }) as { data: any[] | null };
 
   // 5. Счетчики непрочитанных
   const myAppEventIds = (myApplications || [])
@@ -70,8 +87,7 @@ export default async function MyEventsPage() {
     if (!acc[app.event_id]) acc[app.event_id] = [];
     acc[app.event_id].push(app);
     return acc;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  }, {} as Record<string, any[]>);
+  }, {} as Record<string, ApplicationType[]>);
 
   return (
     <main className="max-w-[1200px] mx-auto px-4 md:px-6 py-10 min-h-screen">
