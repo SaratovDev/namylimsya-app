@@ -19,8 +19,9 @@ export default async function MyEventsPage() {
 
   const eventIds = events?.map(e => e.id) || [];
 
-  // 2. Получаем заявки на события пользователя (для блока "Я организатор")
-  const { data: applications } = await supabase
+  // 2. Получаем заявки на события пользователя (исправлен JOIN)
+  // Явно указываем связь profiles!applications_user_id_fkey
+  const { data: applications, error: appsError } = await supabase
     .from('applications')
     .select(`
       id, 
@@ -30,6 +31,10 @@ export default async function MyEventsPage() {
       profiles!applications_user_id_fkey ( username )
     `)
     .in('event_id', eventIds);
+
+  if (appsError) {
+    console.error("Ошибка загрузки заявок:", appsError);
+  }
 
   // 3. Получаем МОИ заявки (для блока "Я участник")
   const { data: myApplications } = await supabase
@@ -43,21 +48,16 @@ export default async function MyEventsPage() {
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
- // 4. Собираем ID ВСЕХ событий (свои + где я участник) для подсчета непрочитанных
+  // 4. Собираем ID ВСЕХ событий (свои + где я участник) для подсчета непрочитанных
   const myAppEventIds = (myApplications || [])
-    .map(app => {
-      // Приводим app к any (или вашему типу), чтобы TS не ругался на вложенный select
-      const event = Array.isArray(app?.events) ? app.events[0] : app?.events;
-      return event?.id;
-    })
-    .filter((id): id is string => Boolean(id)); // Явно указываем, что после фильтра это string[]
+    .map(app => Array.isArray(app.events) ? app.events[0]?.id : app.events?.id)
+    .filter(Boolean) as string[];
 
   const allEventIds = [...new Set([...eventIds, ...myAppEventIds])];
   
-  // Получаем количество непрочитанных для каждого события
   const unreadCounts = await getUnreadCounts(allEventIds);
 
-  // Группируем заявки по event_id для удобного вывода
+  // Группируем заявки по event_id
   const appsByEvent = (applications || []).reduce((acc, app) => {
     if (!acc[app.event_id]) acc[app.event_id] = [];
     acc[app.event_id].push(app);
@@ -87,7 +87,6 @@ export default async function MyEventsPage() {
             return (
               <div key={event.id} className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5 md:p-6 relative">
                 
-                {/* Бейдж непрочитанных сообщений в чате события */}
                 {unread > 0 && (
                   <div className="absolute top-5 right-5 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse shadow-md">
                     В чате {unread} новых
@@ -185,7 +184,6 @@ export default async function MyEventsPage() {
               return (
                 <div key={app.id} className="relative bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5 flex flex-col gap-4">
                   
-                  {/* Бейдж непрочитанных сообщений */}
                   {unread > 0 && (
                     <div className="absolute top-4 right-4 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full animate-pulse">
                       В чате {unread}
