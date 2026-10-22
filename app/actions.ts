@@ -264,3 +264,41 @@ export async function getUnreadCounts(eventIds: string[]) {
 
   return counts;
 }
+
+
+// --- ОТЗЫВЫ: Оставить отзыв ---
+export async function leaveReview(eventId: string, rating: number, comment: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Не авторизован');
+
+  // Получаем ID организатора события
+  const { data: event } = await supabase
+    .from('events')
+    .select('organizer_id')
+    .eq('id', eventId)
+    .single();
+
+  if (!event) throw new Error('Событие не найдено');
+
+  // Вставляем отзыв (RLS в базе проверит, что юзер был approved и событие прошло)
+  const { error } = await supabase
+    .from('reviews')
+    .insert([{
+      event_id: eventId,
+      organizer_id: event.organizer_id,
+      author_id: user.id,
+      rating: rating,
+      comment: comment.trim() || null,
+    }]);
+
+  if (error) {
+    if (error.code === '23505') throw new Error('Вы уже оставляли отзыв на это событие');
+    if (error.code === '42501') throw new Error('Вы не можете оставить отзыв (нет прав или событие еще не прошло)');
+    throw new Error('Не удалось сохранить отзыв');
+  }
+
+  // Обновляем кэш страниц
+  revalidatePath(`/event/${eventId}`);
+  revalidatePath('/'); // На случай, если рейтинг как-то влияет на главную
+}
