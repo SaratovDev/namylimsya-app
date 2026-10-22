@@ -10,7 +10,7 @@ export default async function MyEventsPage() {
 
   if (!user) redirect('/login');
 
-  // 1. Получаем события, которые создал пользователь
+  // 1. Получаем события пользователя
   const { data: events } = await supabase
     .from('events')
     .select('id, title, date_time, organizer_name, max_participants')
@@ -19,24 +19,33 @@ export default async function MyEventsPage() {
 
   const eventIds = events?.map(e => e.id) || [];
 
-  // 2. Получаем заявки на события пользователя (исправлен JOIN)
-  // Явно указываем связь profiles!applications_user_id_fkey
+  // 2. Получаем заявки (БЕЗ JOIN, чтобы наверняка не сломаться)
   const { data: applications, error: appsError } = await supabase
     .from('applications')
-    .select(`
-      id, 
-      status, 
-      event_id, 
-      user_id,
-      profiles!applications_user_id_fkey ( username )
-    `)
+    .select('id, status, event_id, user_id')
     .in('event_id', eventIds);
 
   if (appsError) {
-    console.error("Ошибка загрузки заявок:", appsError);
+    console.error("КРИТИЧЕСКАЯ ОШИБКА загрузки заявок:", appsError);
   }
 
-  // 3. Получаем МОИ заявки (для блока "Я участник")
+  // 3. Получаем профили для этих заявок
+  let applicationsWithProfiles: any[] = [];
+  if (applications && applications.length > 0) {
+    const userIds = [...new Set(applications.map(app => app.user_id))];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .in('id', userIds);
+
+    // Сшиваем заявки с профилями вручную (это быстро и надежно)
+    applicationsWithProfiles = applications.map(app => ({
+      ...app,
+      profile: profiles?.find(p => p.id === app.user_id)
+    }));
+  }
+
+  // 4. Получаем МОИ заявки (для блока "Я участник")
   const { data: myApplications } = await supabase
     .from('applications')
     .select(`
@@ -48,17 +57,16 @@ export default async function MyEventsPage() {
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
-  // 4. Собираем ID ВСЕХ событий (свои + где я участник) для подсчета непрочитанных
+  // 5. Счетчики непрочитанных
   const myAppEventIds = (myApplications || [])
     .map(app => Array.isArray(app.events) ? app.events[0]?.id : app.events?.id)
     .filter(Boolean) as string[];
 
   const allEventIds = [...new Set([...eventIds, ...myAppEventIds])];
-  
   const unreadCounts = await getUnreadCounts(allEventIds);
 
-  // Группируем заявки по event_id
-  const appsByEvent = (applications || []).reduce((acc, app) => {
+  // Группируем
+  const appsByEvent = applicationsWithProfiles.reduce((acc, app) => {
     if (!acc[app.event_id]) acc[app.event_id] = [];
     acc[app.event_id].push(app);
     return acc;
@@ -115,15 +123,12 @@ export default async function MyEventsPage() {
                       <p className="text-sm text-brand-muted font-bold">Новых заявок нет.</p>
                     ) : (
                       <ul className="flex flex-col gap-3">
-                        {pendingApps.map((app) => {
-                          const profile = Array.isArray(app.profiles) ? app.profiles[0] : app.profiles;
-                          return (
-                            <li key={app.id} className="flex items-center justify-between bg-brand-bg p-2 rounded-brand border border-brand-line">
-                              <span className="font-bold text-sm truncate mr-2">@{profile?.username || 'Пользователь'}</span>
-                              <ApplicationActions applicationId={app.id} />
-                            </li>
-                          );
-                        })}
+                        {pendingApps.map((app) => (
+                          <li key={app.id} className="flex items-center justify-between bg-brand-bg p-2 rounded-brand border border-brand-line">
+                            <span className="font-bold text-sm truncate mr-2">@{app.profile?.username || 'Пользователь'}</span>
+                            <ApplicationActions applicationId={app.id} />
+                          </li>
+                        ))}
                       </ul>
                     )}
                   </div>
@@ -134,14 +139,11 @@ export default async function MyEventsPage() {
                       <p className="text-sm text-brand-muted font-bold">Пока никого нет.</p>
                     ) : (
                       <ul className="flex flex-col gap-2">
-                        {approvedApps.map((app) => {
-                          const profile = Array.isArray(app.profiles) ? app.profiles[0] : app.profiles;
-                          return (
-                            <li key={app.id} className="bg-brand-bg p-2 rounded-brand border border-brand-line text-sm font-bold truncate">
-                              @{profile?.username || 'Пользователь'}
-                            </li>
-                          );
-                        })}
+                        {approvedApps.map((app) => (
+                          <li key={app.id} className="bg-brand-bg p-2 rounded-brand border border-brand-line text-sm font-bold truncate">
+                            @{app.profile?.username || 'Пользователь'}
+                          </li>
+                        ))}
                       </ul>
                     )}
                   </div>
