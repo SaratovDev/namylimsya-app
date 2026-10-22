@@ -13,7 +13,6 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   const supabase = await createClient();
   const viewer = await getViewer(supabase);
 
-  // 1. Получаем событие
   const { data: event } = await supabase
     .from('events')
     .select(`
@@ -25,7 +24,6 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 
   if (!event) notFound();
 
-  // 2. Получаем статус заявки
   let myAppStatus = null;
   if (viewer.kind === 'user') {
     const { data: app } = await supabase
@@ -37,47 +35,41 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
     myAppStatus = app?.status || null;
   }
 
-  // 3. Проверки
   const canSeeLocation = canSeeExactLocation(event, viewer, myAppStatus);
   const hasExactCoords = typeof event.lat === 'number' && typeof event.lng === 'number' && canSeeLocation;
   const isOrganizer = viewer.kind === 'user' && viewer.userId === event.organizer_id;
   const isPast = new Date(event.date_time) < new Date();
 
-  // 4. Проверяем, может ли пользователь оставить отзыв
   let canReview = false;
-  if (viewer.kind === 'user') {
-    if (isPast && myAppStatus === 'approved') {
-      const { data: existingReview } = await supabase
-        .from('reviews')
-        .select('id')
-        .eq('event_id', id)
-        .eq('author_id', viewer.userId)
-        .maybeSingle();
-        
-      if (!existingReview) canReview = true;
-    }
+  if (viewer.kind === 'user' && isPast && myAppStatus === 'approved') {
+    const { data: existingReview } = await supabase
+      .from('reviews')
+      .select('id')
+      .eq('event_id', id)
+      .eq('author_id', viewer.userId)
+      .maybeSingle();
+      
+    if (!existingReview) canReview = true;
   }
 
-  // 5. Получаем рейтинг события
   const { data: eventRating } = await supabase
     .rpc('get_event_rating', { ev_id: id })
     .single<{ average_rating: number; total_reviews: number }>();
 
-  // Данные для UI
   const d = new Date(event.date_time);
   const dateStr = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
   const timeStr = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   const organizer = Array.isArray(event.profiles) ? event.profiles[0] : event.profiles;
 
   return (
-    <main className="max-w-[1000px] mx-auto px-4 md:px-6 py-10 min-h-screen">
+    <main className="max-w-[1100px] mx-auto px-4 md:px-6 py-10 min-h-screen">
       
       <Link href="/" className="text-brand-muted font-bold text-sm uppercase hover:text-brand-accent transition-colors mb-6 inline-block">
         ← Вернуться в ленту
       </Link>
 
       {/* Шапка события */}
-      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 md:p-8 mb-8 relative">
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 md:p-8 mb-6 relative">
         <div className="flex flex-col md:flex-row justify-between gap-6">
           
           <div className="flex-1">
@@ -96,7 +88,6 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
                 {canSeeLocation ? event.location : "Место скрыто организатором"} 
               </p>
               
-              {/* Плашка "Событие прошло" переехала сюда */}
               {isPast && (
                 <div className="mt-2 inline-block bg-brand-bg border-2 border-brand-line px-3 py-1 rounded text-brand-muted font-extrabold text-xs uppercase">
                   Событие уже прошло
@@ -105,10 +96,8 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
             </div>
           </div>
 
-          {/* Правая часть шапки: Организатор + Рейтинг */}
+          {/* Организатор и Рейтинг в шапке */}
           <div className="flex flex-col gap-3 min-w-[200px]">
-            
-            {/* Блок организатора */}
             <div className="bg-brand-bg p-4 rounded-brand border-2 border-brand-line flex items-center gap-3">
               <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex-shrink-0">
                  {organizer?.avatar_url ? (
@@ -127,7 +116,6 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
               </div>
             </div>
 
-            {/* Рейтинг события (переехал сюда) */}
             <div className="bg-brand-bg p-3 rounded-brand border-2 border-brand-line text-center">
               <h3 className="text-[10px] font-extrabold uppercase text-brand-muted mb-1">Рейтинг события</h3>
               {eventRating && eventRating.total_reviews > 0 ? (
@@ -140,46 +128,56 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
                 <p className="text-xs font-bold text-brand-muted">Пока нет отзывов</p>
               )}
             </div>
-            
           </div>
         </div>
       </div>
 
-      {/* Теперь контент идет в одну колонку на всю ширину */}
-      <div className="flex flex-col gap-8">
-        
-        {/* Кнопка оставить отзыв (если можно) */}
-        {canReview && (
-          <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
-            <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Поделитесь впечатлениями</h2>
-            <ReviewForm eventId={event.id} />
-          </div>
-        )}
-
-        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
-          <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Описание</h2>
-          <p className="text-brand-text whitespace-pre-wrap leading-relaxed">{event.description}</p>
+      {/* Кнопка оставить отзыв */}
+      {canReview && (
+        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 mb-6">
+          <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Поделитесь впечатлениями</h2>
+          <ReviewForm eventId={event.id} />
         </div>
+      )}
 
-        {/* Карта */}
-        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
-          <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Локация</h2>
-          {hasExactCoords ? (
-            <ClientMapWrapper lat={event.lat} lng={event.lng} title={event.title} />
+      {/* Сетка: Чат слева, Описание и Локация справа */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_350px] gap-6">
+        
+        {/* ЛЕВАЯ КОЛОНКА (Чат) */}
+        <div>
+          {(isOrganizer || myAppStatus === 'approved' || myAppStatus === 'pending') && viewer.kind === 'user' ? (
+            <EventChat eventId={event.id} currentUserId={viewer.userId} />
           ) : (
-            <div className="h-48 bg-brand-bg border-2 border-dashed border-brand-line rounded flex items-center justify-center text-brand-muted font-bold text-center p-4">
-              Точное место откроется после подтверждения вашей заявки.
+            <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 text-center h-full flex flex-col justify-center items-center">
+              <span className="text-4xl mb-4">💬</span>
+              <h2 className="text-xl font-extrabold uppercase mb-2">Чат события</h2>
+              <p className="text-brand-muted font-bold max-w-xs">Чат доступен только организатору и участникам с поданной заявкой.</p>
             </div>
           )}
         </div>
 
-        {/* Чат */}
-        {(isOrganizer || myAppStatus === 'approved' || myAppStatus === 'pending') && viewer.kind === 'user' && (
-          <div>
-            <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Чат события</h2>
-            <EventChat eventId={event.id} currentUserId={viewer.userId} />
+        {/* ПРАВАЯ КОЛОНКА (Описание + Карта) */}
+        <div className="flex flex-col gap-6">
+          
+          {/* Описание */}
+          <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
+            <h2 className="text-lg font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Описание</h2>
+            <p className="text-brand-text whitespace-pre-wrap leading-relaxed text-sm">{event.description}</p>
           </div>
-        )}
+
+          {/* Локация */}
+          <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
+            <h2 className="text-lg font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Локация</h2>
+            {hasExactCoords ? (
+              <ClientMapWrapper lat={event.lat} lng={event.lng} title={event.title} />
+            ) : (
+              <div className="h-48 bg-brand-bg border-2 border-dashed border-brand-line rounded flex items-center justify-center text-brand-muted font-bold text-center p-4 text-sm">
+                Точное место откроется после подтверждения вашей заявки.
+              </div>
+            )}
+          </div>
+
+        </div>
 
       </div>
     </main>
