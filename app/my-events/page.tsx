@@ -43,10 +43,14 @@ export default async function MyEventsPage() {
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
-  // 4. Собираем ID ВСЕХ событий (свои + где я участник) для подсчета непрочитанных
+ // 4. Собираем ID ВСЕХ событий (свои + где я участник) для подсчета непрочитанных
   const myAppEventIds = (myApplications || [])
-    .map(app => Array.isArray(app.events) ? app.events[0]?.id : app.events?.id)
-    .filter(Boolean) as string[];
+    .map(app => {
+      // Приводим app к any (или вашему типу), чтобы TS не ругался на вложенный select
+      const event = Array.isArray(app?.events) ? app.events[0] : app?.events;
+      return event?.id;
+    })
+    .filter((id): id is string => Boolean(id)); // Явно указываем, что после фильтра это string[]
 
   const allEventIds = [...new Set([...eventIds, ...myAppEventIds])];
   
