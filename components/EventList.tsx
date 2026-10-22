@@ -1,24 +1,39 @@
-import { supabase } from '@/lib/supabase';
+// components/EventList.tsx
+import Link from 'next/link';
+import { createClient } from '@/lib/supabase-server';
+import { getViewer } from '@/lib/event-access';
+import { getEventListDTOs } from '@/lib/event-queries';
 import EventCard from './EventCard';
 
-function formatDate(dateString: string) {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' }) + 
-    ' · ' + 
-    date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
+export default async function EventList({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const params = await searchParams;
+  const currentPage = Number(params.page) || 1;
+  const limit = 10; // Сколько грузим за раз
+  const offset = (currentPage - 1) * limit;
 
-export default async function EventList() {
-  const { data: events, error } = await supabase
-    .from('events')
-    .select('*')
-    .order('date_time', { ascending: true });
+  const supabase = await createClient();
+  const viewer = await getViewer(supabase);
 
-  if (error) {
-    return <div className="text-red-500 font-bold p-4">Ошибка загрузки</div>;
+  let result;
+  try {
+    result = await getEventListDTOs(supabase, viewer, limit, offset);
+  } catch (error) {
+    console.error('ОШИБКА БАЗЫ:', error);
+    return (
+      <div className="text-center py-10 border-2 border-dashed border-brand-line rounded-brand-lg text-brand-muted font-bold">
+        Не удалось загрузить события. Попробуйте обновить страницу.
+      </div>
+    );
   }
 
-  if (!events || events.length === 0) {
+  const { items, total } = result;
+  const hasMore = offset + items.length < total;
+
+  if (items.length === 0 && currentPage === 1) {
     return (
       <div className="text-center py-10 border-2 border-dashed border-brand-line rounded-brand-lg text-brand-muted font-bold">
         Пока нет событий. Станьте первым организатором!
@@ -27,27 +42,20 @@ export default async function EventList() {
   }
 
   return (
-     <div className="flex flex-col gap-6 items-center w-full">
-      {events.map((event) => (
-        <EventCard 
-          key={event.id} 
-          id={event.id} 
-          organizerId={event.organizer_id} 
-          category={event.category} 
-          date={formatDate(event.date_time)} 
-          dateTime={event.date_time}
-          spots={event.is_full ? 'Мест нет' : `Осталось: ${event.max_participants}`} 
-          title={event.title} 
-          description={event.description} 
-          organizerName={event.organizer_name} 
-          organizerRank={event.organizer_rank} 
-          isFull={event.is_full} 
-          location={event.location}
-          lat={event.lat}                // <-- Добавили
-          lng={event.lng}                // <-- Добавили
-          hideLocation={event.hide_location} // <-- Добавили
-        />
+    <div className="flex flex-col gap-6 items-center w-full">
+      {items.map((item) => (
+        <EventCard key={item.id} item={item} />
       ))}
+      
+      {/* Кнопка "Показать ещё" */}
+      {hasMore && (
+        <Link
+          href={`/?page=${currentPage + 1}`}
+          className="mt-4 px-6 py-3 bg-brand-surface border-2 border-brand-line rounded-brand font-extrabold uppercase hover:bg-brand-bg transition-colors"
+        >
+          Показать ещё
+        </Link>
+      )}
     </div>
   );
 }

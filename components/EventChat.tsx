@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { markChatAsRead } from '@/app/actions';
+import Image from 'next/image';
 
 interface EventChatProps {
   eventId: string;
@@ -13,24 +15,39 @@ interface Message {
   content: string;
   user_id: string;
   created_at: string;
-  profiles?: { username: string }; // Подтягиваем никнейм
+  reply_to: string | null;
+  profiles?: { username: string; avatar_url: string | null; gender: string | null }; 
+  reply_profile?: { username: string };
+  reply_content?: string;
 }
+
+const MAX_MESSAGE_LENGTH = 1000;
 
 export default function EventChat({ eventId, currentUserId }: EventChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Кэш профилей (теперь храним и аватарку тоже)
+  const profilesCache = useRef<Record<string, { username: string; avatar_url: string | null; gender: string | null }>>({});
+  const lastSendTime = useRef<number>(0);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-   // 1. Загружаем историю сообщений
+  // 1. Загрузка истории + отметка о прочтении
   useEffect(() => {
     const fetchMessages = async () => {
-      // Грузим только сообщения
+      markChatAsRead(eventId);
+
       const { data: msgs, error } = await supabase
         .from('messages')
         .select('*')
         .eq('event_id', eventId)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: false })
+        .limit(50);
 
       if (error) {
         console.error("Ошибка загрузки сообщений:", error);
@@ -39,20 +56,44 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
       }
 
       if (msgs && msgs.length > 0) {
-        // Собираем уникальные ID авторов
-        const userIds = [...new Set(msgs.map(m => m.user_id))];
+        const sortedMsgs = msgs.reverse();
+        const userIds = [...new Set(sortedMsgs.map(m => m.user_id))];
         
-        // Грузим их профили
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, username')
-          .in('id', userIds);
+        const missingUserIds = userIds.filter(id => !profilesCache.current[id]);
+        
+        if (missingUserIds.length > 0) {
+          // Запрашиваем username, avatar_url и gender
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, username, avatar_url, gender')
+            .in('id', missingUserIds);
+            
+          profiles?.forEach(p => {
+            profilesCache.current[p.id] = { 
+              username: p.username, 
+              avatar_url: p.avatar_url,
+              gender: p.gender
+            };
+          });
+        }
 
-        // Объединяем данные
-        const msgsWithProfiles = msgs.map(msg => ({
-          ...msg,
-          profiles: profiles?.find(p => p.id === msg.user_id)
-        }));
+        const msgsWithProfiles = sortedMsgs.map(msg => {
+          let replyData = {};
+          if (msg.reply_to) {
+            const original = sortedMsgs.find(m => m.id === msg.reply_to);
+            if (original) {
+              replyData = {
+                reply_content: original.content,
+                reply_profile: profilesCache.current[original.user_id]
+              };
+            }
+          }
+          return {
+            ...msg,
+            profiles: profilesCache.current[msg.user_id],
+            ...replyData
+          };
+        });
 
         setMessages(msgsWithProfiles);
       } else {
@@ -64,27 +105,62 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
     fetchMessages();
   }, [eventId]);
 
-  // 2. Подписываемся на новые сообщения (Realtime)
+  // 2. Realtime подписка
   useEffect(() => {
     const channel = supabase
-      .channel('schema-db-changes')
+      .channel(`chat-${eventId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `event_id=eq.${eventId}` },
         async (payload) => {
-          // Получаем никнейм для нового сообщения
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('username')
-            .eq('id', payload.new.user_id)
-            .single();
+          const newUserId = payload.new.user_id;
+          
+          if (!profilesCache.current[newUserId]) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('username, avatar_url, gender')
+              .eq('id', newUserId)
+              .single();
+            if (profile) {
+              profilesCache.current[newUserId] = { 
+                username: profile.username,
+                avatar_url: profile.avatar_url,
+                gender: profile.gender
+              };
+            }
+          }
+
+          let replyData = {};
+          if (payload.new.reply_to) {
+            const { data: original } = await supabase
+              .from('messages')
+              .select('content, user_id')
+              .eq('id', payload.new.reply_to)
+              .single();
+            if (original) {
+              if (!profilesCache.current[original.user_id]) {
+                 const { data: origProfile } = await supabase.from('profiles').select('username').eq('id', original.user_id).single();
+                 if (origProfile) profilesCache.current[original.user_id] = { username: origProfile.username, avatar_url: null, gender: null };
+              }
+              replyData = {
+                reply_content: original.content,
+                reply_profile: profilesCache.current[original.user_id]
+              };
+            }
+          }
 
           const newMsg = {
             ...payload.new,
-            profiles: profile
+            profiles: profilesCache.current[newUserId],
+            ...replyData
           } as Message;
 
-          setMessages((prev) => [...prev, newMsg]);
+          setMessages((prev) => {
+            if (prev.some(m => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+          
+          markChatAsRead(eventId);
         }
       )
       .subscribe();
@@ -94,25 +170,45 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
     };
   }, [eventId]);
 
-  // Автоскролл вниз при новом сообщении
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() || sending) return;
 
-    const content = newMessage;
-    setNewMessage(''); // Очищаем поле сразу
+    const now = Date.now();
+    if (now - lastSendTime.current < 2000) {
+      alert('Подождите пару секунд перед отправкой.');
+      return;
+    }
+    
+    if (newMessage.length > MAX_MESSAGE_LENGTH) {
+      alert(`Сообщение слишком длинное (максимум ${MAX_MESSAGE_LENGTH}).`);
+      return;
+    }
 
-    const { error } = await supabase
-      .from('messages')
-      .insert([{ event_id: eventId, user_id: currentUserId, content }]);
+    setSending(true);
+    const content = newMessage.trim();
+    const replyId = replyingTo?.id || null;
+    
+    setNewMessage('');
+    setReplyingTo(null);
 
-    if (error) {
-      alert('Ошибка отправки сообщения');
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .insert([{ event_id: eventId, user_id: currentUserId, content, reply_to: replyId }]);
+
+      if (error) throw error;
+      lastSendTime.current = Date.now();
+    } catch (error) {
       console.error(error);
+      alert('Ошибка отправки.');
+      setNewMessage(content); 
+    } finally {
+      setSending(false);
     }
   };
 
@@ -123,7 +219,6 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
   return (
     <div className="flex flex-col bg-brand-surface border-2 border-brand-line rounded-[16px] overflow-hidden h-[450px]">
       
-      {/* Лента сообщений */}
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-brand-bg/50">
         {messages.length === 0 ? (
           <div className="my-auto text-center">
@@ -134,37 +229,83 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
           messages.map((msg) => {
             const isMine = msg.user_id === currentUserId;
             const authorName = msg.profiles?.username || 'Пользователь';
+            const avatarUrl = msg.profiles?.avatar_url;
             const avatarLetter = authorName.charAt(0).toUpperCase();
+            
+            // Цвет фона для заглушки (как в EventCard)
+            const gender = msg.profiles?.gender;
+            const bgClass = gender === 'male' ? 'bg-blue-100 text-blue-800' : 
+                            gender === 'female' ? 'bg-pink-100 text-pink-800' : 
+                            'bg-gray-200 text-gray-700';
 
             return (
-              <div key={msg.id} className={`flex gap-2 max-w-[85%] ${isMine ? 'self-end flex-row-reverse' : 'self-start'}`}>
+              <div key={msg.id} className={`group flex gap-2 max-w-[85%] ${isMine ? 'self-end flex-row-reverse' : 'self-start'}`}>
                 
-                {/* Аватарка */}
-                <div className="w-8 h-8 flex-shrink-0 rounded-full bg-brand-line/10 border border-brand-line/20 flex items-center justify-center text-xs font-extrabold text-brand-muted mt-auto mb-1">
-                  {avatarLetter}
+                {/* Аватарка (картинка или буква) */}
+                <div className={`w-8 h-8 flex-shrink-0 rounded-full border border-brand-line/20 flex items-center justify-center text-xs font-extrabold overflow-hidden mt-auto mb-1 ${!avatarUrl ? bgClass : 'bg-brand-bg'}`}>
+                  {avatarUrl ? (
+                    <Image 
+                      src={avatarUrl} 
+                      alt={authorName} 
+                      width={32} 
+                      height={32} 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    avatarLetter
+                  )}
                 </div>
 
-                {/* Блок с сообщением */}
                 <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
-                  {/* Никнейм (скрываем для своих, чтобы не загромождать) */}
                   {!isMine && (
                     <span className="text-[11px] font-bold text-brand-muted mb-1 ml-1">
                       @{authorName}
                     </span>
                   )}
 
-                  {/* Текст сообщения */}
-                  <div 
-                    className={`px-4 py-2 text-[14px] font-medium leading-relaxed border rounded-2xl ${
-                      isMine 
-                        ? 'bg-orange-100 text-brand-text border-orange-200 rounded-br-sm' // Свои: слабый оранжевый
-                        : 'bg-blue-50 text-brand-text border-blue-100 rounded-bl-sm'     // Чужие: слабый голубой
-                    }`}
-                  >
-                    {msg.content}
+                  <div className="relative flex items-center gap-2">
+                    {isMine && (
+                      <button 
+                        onClick={() => {
+                          setReplyingTo(msg);
+                          inputRef.current?.focus();
+                        }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-brand-muted hover:text-brand-accent p-1 order-first"
+                        title="Ответить"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
+                      </button>
+                    )}
+
+                                       <div 
+                      className={`px-4 py-2 text-[14px] font-medium leading-relaxed border rounded-2xl whitespace-pre-wrap break-all ${
+                        isMine 
+                          ? 'bg-brand-accent-soft text-brand-text border-brand-line rounded-br-sm' 
+                          : 'bg-brand-surface text-brand-text border-brand-line rounded-bl-sm'    
+                      }`}
+                    >
+                      {msg.reply_content && (
+                        <div className="mb-2 pl-2 border-l-2 border-brand-line/50 opacity-70 text-[12px] italic line-clamp-2">
+                          <span className="font-bold">@{msg.reply_profile?.username || 'Юзер'}:</span> {msg.reply_content}
+                        </div>
+                      )}
+                      {msg.content}
+                    </div>
+
+                    {!isMine && (
+                      <button 
+                        onClick={() => {
+                        setReplyingTo(msg);
+                        inputRef.current?.focus();
+                      }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-brand-muted hover:text-brand-accent p-1"
+                        title="Ответить"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
+                      </button>
+                    )}
                   </div>
                 </div>
-
               </div>
             );
           })
@@ -172,21 +313,39 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Поле ввода */}
+      {replyingTo && (
+        <div className="bg-brand-bg border-t-2 border-brand-line px-4 py-2 flex items-center justify-between text-sm">
+          <div className="truncate text-brand-muted">
+            Ответ <span className="font-bold">@{replyingTo.profiles?.username || 'Юзер'}</span>: {replyingTo.content}
+          </div>
+          <button onClick={() => {
+            setReplyingTo(null);
+            inputRef.current?.focus();
+          }} className="text-brand-accent font-bold ml-2">✕</button>
+        </div>
+      )}
+
       <form onSubmit={handleSendMessage} className="p-3 bg-brand-surface border-t-2 border-brand-line flex gap-2 items-end">
-        <input
-          type="text"
+        <textarea
+          ref={inputRef}
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
           placeholder="Написать сообщение..."
-          className="flex-1 p-3 bg-brand-bg border-2 border-brand-line rounded-full outline-none focus:border-brand-accent transition-colors text-sm"
+          maxLength={MAX_MESSAGE_LENGTH}
+          rows={1}
+          className="flex-1 p-3 bg-brand-bg border-2 border-brand-line rounded-2xl outline-none focus:border-brand-accent transition-colors text-sm resize-none max-h-32"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSendMessage(e);
+            }
+          }}
         />
         <button 
           type="submit" 
-          disabled={!newMessage.trim()}
+          disabled={!newMessage.trim() || sending}
           className="w-11 h-11 flex-shrink-0 flex items-center justify-center bg-brand-text text-brand-bg rounded-full hover:bg-brand-accent transition-colors disabled:opacity-50"
         >
-          {/* Иконка самолетика */}
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         </button>
       </form>

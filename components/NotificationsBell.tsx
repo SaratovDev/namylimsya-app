@@ -105,7 +105,7 @@ export default function NotificationsBell() {
           setIsOpen(!isOpen);
           if (!isOpen) markAsRead();
         }}
-        className="relative w-10 h-10 flex items-center justify-center border-2 border-brand-line rounded-brand bg-brand-surface hover:bg-brand-bg transition-colors"
+        className="relative w-10 h-10 flex items-center justify-center  rounded-brand hover:bg-brand-bg transition-colors"
       >
         🔔
         {unreadCount > 0 && (

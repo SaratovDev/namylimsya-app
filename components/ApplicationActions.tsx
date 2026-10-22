@@ -10,9 +10,8 @@ export default function ApplicationActions({ applicationId }: { applicationId: s
     setIsLoading(true);
     try {
       await approveApplication(applicationId);
-    } catch (error) {
-      console.error("Ошибка при подтверждении:", error);
-      alert('Ошибка при подтверждении. Проверьте консоль.');
+    } catch (error: any) {
+      alert(error.message);
     } finally {
       setIsLoading(false);
     }
@@ -24,9 +23,8 @@ export default function ApplicationActions({ applicationId }: { applicationId: s
     setIsLoading(true);
     try {
       await rejectApplication(applicationId);
-    } catch (error) {
-      console.error("Ошибка при отклонении:", error);
-      alert('Ошибка при отклонении. Проверьте консоль.');
+    } catch (error: any) {
+      alert(error.message);
     } finally {
       setIsLoading(false);
     }

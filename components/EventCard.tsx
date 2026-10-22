@@ -2,228 +2,170 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import Map from './Map';
-import Countdown from './Countdown';
-import { User } from '@supabase/supabase-js';
+import Image from 'next/image';
+import type { EventListItemDTO } from '@/lib/event-dto';
+import { applyToEvent, cancelApplication } from '@/app/actions';
+import type { User } from '@supabase/supabase-js';
+import ClientMapWrapper from './ClientMapWrapper';
 
-interface EventCardProps {
-  id: string;
-  organizerId: string;
-  category: string;
-  date: string;
-  dateTime: string;
-  spots: string;
-  title: string;
-  description: string;
-  organizerName: string;
-  organizerRank: string;
-  isFull?: boolean;
-  location: string;
-  lat?: number;
-  lng?: number;
-  hideLocation?: boolean;
-}
+export default function EventCard({ item }: { item: EventListItemDTO }) {
+  const {
+    id,
+    organizerId,
+    unreadCount,
+    category,
+    dateTime,
+    title,
+    description,
+    organizerName,
+    organizerRank,
+    maxParticipants,
+    approvedParticipantsCount,
+    isFull,
+    publicLocationLabel,
+    locationIsHidden,
+    lat,
+    lng,
+    myApplicationStatus,
+    isOrganizer,
+    organizerAvatar,
+    organizerGender,
+  } = item;
 
-export default function EventCard({
-  id,
-  organizerId,
-  category,
-  dateTime,
-  spots,
-  title,
-  description,
-  organizerName,
-  organizerRank,
-  isFull = false,
-  location,
-  lat,
-  lng,
-  hideLocation = false,
-}: EventCardProps) {
-  const [user, setUser] = useState<User | null>(null);
-  const [application, setApplication] = useState<{ id: string; status: string } | null>(null);
-  const [activeAppsCount, setActiveAppsCount] = useState(0);
+  // Локальный статус для мгновенного UI
+  const [myStatus, setMyStatus] = useState<
+    'pending' | 'approved' | 'rejected' | null
+  >(myApplicationStatus);
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
+  const [isCanceling, setIsCanceling] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  
 
+
+  // Получаем пользователя на клиенте, чтобы кнопка сразу менялась
   useEffect(() => {
-    const checkUserAndApplication = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+    });
+  }, []);
 
-      if (user) {
-        const { data } = await supabase
-          .from('applications')
-          .select('id, status')
-          .eq('event_id', id)
-          .eq('user_id', user.id)
-          .maybeSingle();
-        setApplication(data);
+  // Проверка: организатор ли это? Либо из серверного DTO, либо по клиентскому ID
+  const isActuallyOrganizer = isOrganizer || (user !== null && user.id === organizerId);
 
-        const { count } = await supabase
-          .from('applications')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .in('status', ['pending', 'approved']);
-        
-        setActiveAppsCount(count || 0);
-      }
-    };
-    checkUserAndApplication();
-  }, [id]);
+  const hasExactCoords = typeof lat === 'number' && typeof lng === 'number';
 
   const handleApply = async () => {
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-
-    if (activeAppsCount >= 3) {
-      alert('Вы достигли лимита в 3 активные заявки. Дождитесь подтверждения или отмените старую заявку.');
-      return;
-    }
-
     setLoading(true);
-    const { data, error } = await supabase
-      .from('applications')
-      .insert([{ event_id: id, user_id: user.id, status: 'pending' }])
-      .select('id, status')
-      .single();
+    try {
+      await applyToEvent(id);
+      setMyStatus('pending');
+       } catch (error) {
+      const message = error instanceof Error ? error.message : 'Произошла ошибка';
+      alert(message);
+      } finally {
 
-    if (!error && data) {
-      setApplication(data);
-      setActiveAppsCount(prev => prev + 1);
-      
-      await supabase.from('notifications').insert({
-        user_id: organizerId,
-        content: `На ваше событие «${title}» отправлена новая заявка!`,
-        link: `/my-events`
-      });
-    } else {
-      alert('Ошибка при подаче заявки');
-      console.error(error);
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleCancel = async () => {
     if (!confirm('Вы уверены, что хотите отменить заявку?')) return;
-    if (!application?.id) return;
-
     setIsCanceling(true);
     try {
-      const { error } = await supabase
-        .from('applications')
-        .delete()
-        .eq('id', application.id);
-        
-      if (error) throw error;
-      
-      setApplication(null);
-      setActiveAppsCount(prev => prev - 1);
-    } catch {
-      alert('Не удалось отменить заявку');
+      await cancelApplication(id);
+      setMyStatus(null);
+   } catch (error) {
+      const message = error instanceof Error ? error.message : 'Произошла ошибка';
+      alert(message);
     } finally {
       setIsCanceling(false);
     }
   };
 
-  const [isCanceling, setIsCanceling] = useState(false);
-
-  // Логика отображения кнопки
+  // Состояние кнопки
   let buttonText = 'Хочу участвовать';
   let buttonDisabled = isFull || loading;
-  let buttonClass = 'bg-brand-accent text-brand-accent-ink hover:bg-brand-text hover:text-brand-bg';
+  let buttonClass =
+    'bg-brand-accent text-brand-accent-ink hover:bg-brand-text hover:text-brand-bg';
 
-  const isOrganizer = user?.id === organizerId;
-  const isLimitReached = activeAppsCount >= 3 && !application;
-
-  if (isOrganizer) {
+  if (isActuallyOrganizer) {
     buttonText = 'Это ваше событие';
     buttonDisabled = true;
-    buttonClass = 'bg-brand-surface text-brand-muted border-brand-muted cursor-default';
-  } else if (isLimitReached) {
-    buttonText = 'Лимит заявок (3)';
-    buttonDisabled = true;
-    buttonClass = 'bg-brand-bg text-brand-muted border-brand-muted cursor-not-allowed';
-  } else if (application?.status === 'pending') {
+    buttonClass =
+      'bg-brand-surface text-brand-muted border-brand-muted cursor-default';
+  } else if (myStatus === 'pending') {
     buttonText = 'Заявка отправлена';
     buttonDisabled = true;
-    buttonClass = 'bg-brand-bg text-brand-muted border-brand-muted cursor-not-allowed';
-  } else if (application?.status === 'approved') {
+    buttonClass =
+      'bg-brand-bg text-brand-muted border-brand-muted cursor-not-allowed';
+  } else if (myStatus === 'approved') {
     buttonText = 'Вы записаны ✓';
     buttonDisabled = true;
     buttonClass = 'bg-green-600 text-white border-green-800 cursor-default';
   } else if (isFull) {
     buttonText = 'Мест нет';
     buttonDisabled = true;
-    buttonClass = 'bg-brand-bg text-brand-muted border-brand-muted cursor-not-allowed';
+    buttonClass =
+      'bg-brand-bg text-brand-muted border-brand-muted cursor-not-allowed';
   }
 
-  // Форматируем дату для левой колонки
   const d = new Date(dateTime);
   const dayNumber = d.getDate();
-  const monthName = d.toLocaleDateString('ru-RU', { month: 'long' }); // "октября"
-  const timeOnly = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const monthName = d.toLocaleDateString('ru-RU', { month: 'short' });
+  const timeOnly = d.toLocaleTimeString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
   return (
     <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg flex flex-col sm:flex-row overflow-hidden hover:opacity-95 transition-opacity w-full">
-      
-      {/* ЛЕВАЯ КОЛОНКА: ДАТА */}
-<div className="bg-brand-bg/50 p-4 sm:w-[140px] flex-shrink-0 flex flex-row sm:flex-col justify-between sm:justify-center items-center sm:items-start border-b-2 sm:border-b-0 sm:border-r-2 border-brand-line gap-2 sm:gap-0">
-  <div className="flex flex-row sm:flex-col items-baseline sm:items-start gap-2 sm:gap-0">
-    <span className="text-4xl font-extrabold leading-none text-brand-text">{dayNumber}</span>
-    <span className="text-sm font-bold text-brand-muted sm:mt-1">{monthName}</span>
-  </div>
+      {/* ЛЕВАЯ КОЛОНКА */}
+      <div className="bg-brand-bg/50 p-4 sm:w-[150px] flex-shrink-0 flex flex-row sm:flex-col items-left border-b-2 sm:border-b-0 sm:border-r-2 border-brand-line gap-4 sm:gap-0 justify-between">
+        <div className="flex-shrink-0 w-full flex justify-center sm:justify-start">
+          <span className="text-[10px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-1 rounded border border-brand-cat/30 text-center block leading-tight">
+            {category}
+          </span>
+        </div>
 
-        
-        <div className="flex flex-col items-end sm:items-start sm:mt-4">
-          <span className="text-sm font-extrabold text-brand-text">{timeOnly}</span>
-          <div className="mt-1">
-            <Countdown targetDate={dateTime} />
+        <div className="flex flex-row sm:flex-col items-baseline sm:items-start justify-start w-full gap-2 sm:gap-0 sm:my-auto">
+          <div className="flex items-baseline gap-1">
+            <span className="text-5xl font-extrabold leading-none text-brand-text">
+              {dayNumber}
+            </span>
+            <span className="text-[16px] font-bold text-brand-muted">
+              {monthName}
+            </span>
           </div>
+          <span className="text-2xl font-extrabold text-brand-text sm:mt-1">
+            {timeOnly}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-center sm:justify-start gap-1 w-full text-[12px] font-extrabold text-brand-muted">
+          👤
+          <span>
+            {approvedParticipantsCount} / {maxParticipants}
+          </span>
         </div>
       </div>
 
-      {/* ПРАВАЯ КОЛОНКА: КОНТЕНТ */}
+      {/* ПРАВАЯ КОЛОНКА */}
       <div className="p-5 md:p-6 flex-grow flex flex-col min-w-0">
-        
-        {/* Верхняя строка: Категория и Места */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4 sm:mb-4">
-          <span className="text-[11px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-0.5 rounded border border-brand-cat/30 w-fit">
-            {category}
-          </span>
-          <span className={`sm:ml-auto text-[12px] font-extrabold px-2 py-0.5 rounded border border-brand-line/30 w-fit ${isFull ? 'text-brand-muted bg-brand-bg line-through' : 'bg-brand-bg'}`}>
-            {isFull ? 'Мест нет' : `Мест осталось: ${spots.replace('Осталось: ', '')}`}
-          </span>
-        </div>
-
-        {/* Организатор */}
-        <div className="flex items-center gap-2 text-sm mb-5 mt-auto">
-          <span className="w-6 h-6 flex items-center justify-center rounded-full bg-brand-cat-soft text-brand-cat border border-brand-cat font-extrabold text-[10px] uppercase">
-            {organizerName.charAt(0)}
-          </span>
-          <Link href={`/@${organizerName}`} className="text-brand-text hover:text-brand-accent transition-colors font-bold">
-            {organizerName}
-          </Link> 
-          <span className="text-brand-accent font-extrabold text-[11px] uppercase">{organizerRank}</span>
-        </div>
-
-
-        {/* Заголовок */}
-        <Link href={`/event/${id}`} className="block hover:text-brand-accent transition-colors mt-2">
+        <Link
+          href={`/event/${id}`}
+          className="block hover:text-brand-accent transition-colors"
+        >
           <h2 className="text-xl md:text-2xl font-extrabold leading-tight">
             {title}
           </h2>
         </Link>
 
-        {/* Место */}
-        <div className="flex items-center gap-1.5 text-[13px] font-medium text-brand-muted mt-2 mb-3">
-            <svg
-            width="32"
-            height="32"
+        {/* Публичная метка места */}
+        <div className="flex items-center gap-1.5 text-[13px] font-bold text-brand-muted mt-2 mb-3">
+          <svg
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -231,46 +173,83 @@ export default function EventCard({
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-            <circle cx="12" cy="9" r="2.5" />
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+            <circle cx="12" cy="10" r="3"></circle>
           </svg>
-          <span className="truncate">
-            {hideLocation && !isOrganizer && application?.status !== 'approved' 
-              ? 'Место скрыто организатором' 
-              : location}
-          </span>
+          <span className="truncate">{publicLocationLabel}</span>
         </div>
 
-        {/* Описание */}
-        <p className="text-[16px] text-brand-text/120 mb-4 line-clamp-2 leading-relaxed">
+        <p className="text-[14px] text-brand-text/80 mb-4 line-clamp-2 leading-relaxed">
           {description}
         </p>
 
-        
-        {/* Кнопки */}
+        <div className="flex items-center gap-2 text-sm mb-5 mt-auto">
+          <div
+            className={`w-8 h-8 rounded-full border border-brand-line flex items-center justify-center text-[10px] font-extrabold flex-shrink-0 overflow-hidden
+              ${
+                organizerGender === 'male'
+                  ? 'bg-blue-100 text-blue-800'
+                  : organizerGender === 'female'
+                  ? 'bg-pink-100 text-pink-800'
+                  : 'bg-gray-200 text-gray-700'
+              }
+            `}
+          >
+            {organizerAvatar ? (
+              <Image
+                src={organizerAvatar}
+                alt={organizerName}
+                width={24}
+                height={24}
+                className="w-5 h-5 object-contain"
+              />
+            ) : (
+              organizerName.charAt(0)
+            )}
+          </div>
+
+          <div className="flex flex-col min-w-0">
+            <Link
+              href={`/@${organizerName}`}
+              className="text-brand-text hover:text-brand-accent transition-colors font-bold truncate leading-tight"
+            >
+              {organizerName}
+            </Link>
+            <span className="text-brand-accent font-extrabold text-[10px] uppercase leading-tight mt-0.5">
+              {organizerRank}
+            </span>
+          </div>
+        </div>
+
         <div className="flex flex-wrap gap-2 mt-auto">
-          <button 
+          <button
             onClick={handleApply}
             disabled={buttonDisabled}
             className={`flex-1 font-extrabold text-[13px] uppercase px-4 py-2 border-2 border-brand-line rounded-brand transition-colors ${buttonClass}`}
           >
             {buttonText}
           </button>
-          
-          {(application || isOrganizer) && (
-            <Link 
+
+          {(myStatus || isActuallyOrganizer) && (
+            <Link
               href={`/event/${id}`}
-              className="bg-brand-surface text-brand-text font-extrabold text-[13px] uppercase px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-cat-soft transition-colors flex items-center justify-center"
+              className="relative bg-brand-surface text-brand-text font-extrabold text-[13px] uppercase px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-cat-soft transition-colors flex items-center justify-center"
             >
-              Чат события
+              Чат
+              {/* Бейдж непрочитанных */}
+              {unreadCount > 0 && (
+                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-brand-surface">
+                  {unreadCount}
+                </span>
+              )}
             </Link>
           )}
-          
-          {application?.status === 'pending' && (
-            <button 
+
+          {myStatus === 'pending' && (
+            <button
               onClick={handleCancel}
               disabled={isCanceling}
-              className="bg-red-100 text-red-700 font-extrabold text-[13px] uppercase px-4 py-2 border-2 border-red-300 rounded-brand hover:bg-red-200 transition-colors disabled:opacity-50"
+              className="bg-red-100 text-red-700 font-extrabold text-[13px] uppercase px-3 py-2 border-2 border-red-300 rounded-brand hover:bg-red-200 transition-colors disabled:opacity-50"
               title="Отменить заявку"
             >
               ✕
@@ -278,30 +257,46 @@ export default function EventCard({
           )}
         </div>
 
-        {/* Карта (если есть координаты) */}
-        {lat && lng && (
-          <details className="mt-4 border-t border-dashed border-brand-line/30 pt-3">
+        {/* Карта */}
+        {hasExactCoords && (
+          <details className="mt-4 border-t border-dashed border-brand-line/30 pt-3 group">
             <summary className="list-none cursor-pointer text-brand-muted hover:text-brand-accent font-bold text-[12px] uppercase transition-colors flex items-center gap-1">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon></svg>
+              <svg
+                className="transition-transform duration-300 group-open:rotate-180"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
               Показать на карте
             </summary>
-            <div className="mt-3">
-              <Map 
-                lat={lat} 
-                lng={lng} 
-                title={title} 
-                hideExactLocation={hideLocation && !isOrganizer && application?.status !== 'approved'} 
-              />
-              
-              {hideLocation && !isOrganizer && application?.status !== 'approved' && (
-                <div className="mt-2 p-2 bg-brand-heat/10 border border-brand-heat rounded-brand text-brand-text font-bold text-[11px]">
-                  Точное место откроется после подтверждения заявки.
+            <div className="details-content">
+              <div className="details-inner">
+                <div className="mt-3">
+                  <ClientMapWrapper
+                    lat={lat as number}
+                    lng={lng as number}
+                    title={title}
+                    hideExactLocation={false}
+                  />
                 </div>
-              )}
+              </div>
             </div>
           </details>
         )}
-        
+
+        {/* Плашка «место скрыто» */}
+        {locationIsHidden && !hasExactCoords && (
+          <div className="mt-3 p-2 bg-brand-heat/10 border border-brand-heat rounded-brand text-brand-text font-bold text-[11px]">
+            Точное место откроется после подтверждения заявки.
+          </div>
+        )}
       </div>
     </article>
   );

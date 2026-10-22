@@ -1,9 +1,9 @@
 import { createClient } from '@/lib/supabase-server';
 import { notFound } from 'next/navigation';
-import Map from '@/components/MapComponent';
 import Link from 'next/link';
 import EventChat from '@/components/EventChat';
-import Countdown from '@/components/Countdown';
+import ClientMapWrapper from '@/components/ClientMapWrapper';
+
 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -14,7 +14,10 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   // Получаем событие
   const { data: event } = await supabase
     .from('events')
-    .select('*')
+    .select(`
+      *,
+    profiles!events_organizer_profile_fkey (avatar_url, gender)
+    `)
     .eq('id', id)
     .single();
 
@@ -57,10 +60,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           <span className="text-[14px] font-extrabold bg-brand-bg px-3 py-1 rounded border-2 border-brand-line">
             {new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })} в {new Date(event.date_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
           </span>
-            <span className="text-[14px] font-extrabold bg-brand-bg px-3 py-1 rounded border-2 border-brand-line flex items-center gap-2">
-            {new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })} в {new Date(event.date_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-            <Countdown targetDate={event.date_time} />
-          </span>
+
         </div>
 
         <h1 className="text-3xl md:text-4xl font-extrabold mb-4">{event.title}</h1>
@@ -83,7 +83,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         <p className="font-bold text-brand-muted mb-4">{event.location}</p>
         
                {event.lat && event.lng ? (
-          <Map 
+          <ClientMapWrapper
             lat={event.lat} 
             lng={event.lng} 
             title={event.title} 

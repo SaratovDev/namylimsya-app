@@ -74,14 +74,14 @@ export default function CreateEventForm() {
         <div className="flex flex-col gap-1.5">
           <label className="text-[12px] font-extrabold uppercase text-brand-muted">Категория</label>
           <select name="category" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors">
-            <option>Прогулки и активный отдых</option>
-            <option>Спорт и игры</option>
-            <option>Культура (концерты, выставки, кино)</option>
-            <option>Еда и напитки</option>
-            <option>Обучение и лекции</option>
+            <option>Прогулки</option>
+            <option>Спорт</option>
+            <option>Культура</option>
+            <option>Еда/напитки</option>
+            <option>Обучение</option>
             <option>Поездки</option>
-            <option>Помощь и волонтёрство</option>
-            <option>Просто встретиться / здесь и сейчас</option>
+            <option>Волонтёрство</option>
+            <option>Здесь и сейчас</option>
           </select>
         </div>
         <div className="flex flex-col gap-1.5">

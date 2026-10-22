@@ -50,10 +50,14 @@ export default function Countdown({ targetDate }: { targetDate: string }) {
   }
 
   return (
-    <span className={`text-[12px] font-bold transition-colors ${
-      isUrgent ? 'text-brand-accent' : 'text-brand-muted'
-    }`}>
-      {timeLeft}
-    </span>
-  );
-}
+    <div className="flex flex-col">
+      <span className="text-[12px] font-regular text-brand-muted leading-tight">
+        До события:
+      </span>
+      <span className={`text-[12px] font-regular text-brand-muted leading-tight ${
+        isUrgent ? 'text-brand-accent' : 'text-brand-muted'
+      }`}>
+        {timeLeft.replace('Осталось ', '')}
+      </span>
+    </div>
+  ); }

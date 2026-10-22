@@ -38,57 +38,52 @@ function LoginForm() {
         router.push('/');
         router.refresh();
       } else {
-        // РЕГИСТРАЦИЯ
-        // 1. Проверяем, не занят ли никнейм (простой запрос)
-        const { data: existingUser } = await supabase
-          .from('profiles')
-          .select('username')
-          .eq('username', username)
-          .single();
-
-        if (existingUser) {
-          throw new Error('Этот никнейм уже занят. Придумайте другой.');
-        }
-
-        // 2. Создаем пользователя в Auth
-        const { data: authData, error: authError } = await supabase.auth.signUp({ 
+                // РЕГИСТРАЦИЯ
+        // 1. Создаем пользователя в Auth, передавая никнейм и пол в метаданные
+        const { error: authError } = await supabase.auth.signUp({ 
           email, 
-          password 
+          password,
+          options: {
+            data: {
+              username: username,
+              gender: gender,
+            }
+          }
         });
         
-        if (authError) throw authError;
-
-        // 3. Если пользователь создался, обновляем его профиль (добавляем выбранный никнейм)
-               if (authData.user) {
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .update({ 
-              username: username,
-              email: email,         // <-- сохраняем email
-              gender: gender        // <-- сохраняем пол
-            })
-            .eq('id', authData.user.id);
-          if (profileError) {
-             console.error("Ошибка обновления профиля:", profileError);
-             // Если никнейм не записался (например, из-за уникальности), 
-             // мы должны удалить созданного пользователя, но в Supabase это сложно сделать с клиента.
-             // Поэтому просто просим ввести другой никнейм.
-             throw new Error('Не удалось закрепить никнейм. Возможно, он только что был занят.');
+        if (authError) {
+          // Если база вернула ошибку уникальности (никнейм занят)
+          if (authError.message.includes('duplicate key') || authError.message.includes('unique constraint')) {
+            throw new Error('Этот никнейм уже занят. Придумайте другой.');
           }
+          throw authError;
         }
+
+        // 2. Профиль создастся автоматически через триггер в базе!
+        // Клиентский update больше не нужен.
 
         setMessage('Регистрация успешна! Теперь вы можете войти.');
         setIsLogin(true);
       }
-   } catch (error) {
-      // Безопасно извлекаем сообщение об ошибке
-      const errorMessage = error instanceof Error ? error.message : 'Произошла неизвестная ошибка';
-      setMessage(errorMessage);
+    } catch (error) {
+      let msg = 'Произошла неизвестная ошибка';
+      
+      // Приводим тип к Error
+      if (error instanceof Error) {
+        if (error.message.includes('duplicate key') || error.message.includes('unique constraint')) {
+          msg = 'Этот никнейм уже занят.';
+        } else if (error.message.includes('Password should be at least')) {
+          msg = 'Пароль слишком короткий (минимум 6 символов).';
+        } else {
+          msg = error.message;
+        }
+      }
+      setMessage(msg);
     } finally {
       setLoading(false);
     }
   };
-
+  
   return (
     <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8">
       <h1 className="text-2xl font-extrabold uppercase mb-6 text-center">

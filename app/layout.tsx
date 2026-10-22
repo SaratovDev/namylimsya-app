@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Header from "@/components/Header";
-import PageTransition from "@/components/PageTransition"; // <-- ИМПОРТ
+import PageTransition from "@/components/PageTransition";
 
 export const metadata: Metadata = {
   title: "Намылимся. — Лента",
@@ -14,11 +14,27 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ru" data-theme="light">
-      <body className="min-h-screen flex flex-col"> {/* Добавили flex для прижатия футера */}
+    <html lang="ru" data-theme="light" suppressHydrationWarning>
+      <head>
+        {/* Скрипт для мгновенного применения темы до рендера (чтобы не было вспышки) */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                const theme = localStorage.getItem('theme');
+                if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                  document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                  document.documentElement.setAttribute('data-theme', 'light');
+                }
+              } catch (e) {}
+            `,
+          }}
+        />
+      </head>
+      <body className="min-h-screen flex flex-col">
         <Header />
         
-        {/* Оборачиваем в анимированный компонент */}
         <PageTransition>
           {children}
         </PageTransition>
