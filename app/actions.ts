@@ -13,18 +13,26 @@ export async function createEvent(formData: FormData) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  if (authError || !user) throw new Error('Необходимо войти в аккаунт');
+  if (authError || !user) return { error: 'Необходимо войти в аккаунт' };
 
-  // 1. Собираем "сырые" данные из формы (date и time отдельно)
+  // ПРОВЕРКА ЛИМИТА
+  const { count: activeEvents, error: countError } = await supabase
+    .from('events')
+    .select('*', { count: 'exact', head: true })
+    .eq('organizer_id', user.id)
+    .gte('date_time', new Date().toISOString());
+
+  if (countError) return { error: 'Не удалось проверить лимит событий' };
+  if (activeEvents && activeEvents >= 2) {
+    return { error: 'У вас уже есть 2 активных события. Дождитесь их завершения, чтобы создать новое.' };
+  }
+
+  // 1. Сбор данных
   const dateStr = formData.get('date') as string | null;
   const timeStr = formData.get('time') as string | null;
   
-  // Проверяем наличие даты/времени до сборки
-  if (!dateStr || !timeStr) {
-    throw new Error('Укажите дату и время события');
-  }
+  if (!dateStr || !timeStr) return { error: 'Укажите дату и время события' };
 
-  // 2. Формируем объект для валидации (включая объединение даты и времени)
   const rawData = {
     title: formData.get('title'),
     description: formData.get('description'),
@@ -33,22 +41,22 @@ export async function createEvent(formData: FormData) {
     max_participants: formData.get('max_participants'),
     lat: formData.get('lat') || null,
     lng: formData.get('lng') || null,
-    date_time: `${dateStr}T${timeStr}`, // Получится, например, "2026-10-25T18:30"
+    date_time: `${dateStr}T${timeStr}`,
     hide_location: formData.get('hide_location') === 'on',
+    city: formData.get('city'),
   };
 
-  // 3. Валидируем данные с помощью Zod
+  // 2. Валидация
   const result = createEventSchema.safeParse(rawData);
   
   if (!result.success) {
-    // Достаем первую ошибку, чтобы показать пользователю
-  const firstError = result.error.issues[0]?.message || 'Некорректные данные';
-    throw new Error(firstError);
+    const firstError = result.error.issues[0]?.message || 'Некорректные данные';
+    return { error: firstError };
   }
 
-  const { title, description, category, location, max_participants, lat, lng, date_time, hide_location } = result.data;
+  const { title, description, city, category, location, max_participants, lat, lng, date_time, hide_location } = result.data;
 
-  // 4. Получаем никнейм организатора
+  // 3. Никнейм организатора
   const { data: profile } = await supabase
     .from('profiles')
     .select('username')
@@ -57,39 +65,32 @@ export async function createEvent(formData: FormData) {
 
   const organizerName = profile?.username || 'Пользователь';
 
-  // 5. Вставляем только проверенные данные
+  // 4. Вставка в БД
   const { error } = await supabase
     .from('events')
     .insert([{
-      title,
-      description,
-      category,
-      date_time,
-      location,
-      lat,
-      lng,
-      max_participants,
-      hide_location,
+      title, description, category, date_time, location, lat, lng, max_participants, hide_location,
       organizer_name: organizerName,
       organizer_id: user.id,
-      organizer_rank: 'Инициатор', // Жестко задано на сервере
+      organizer_rank: 'Инициатор',
+      city,
     }]);
 
   if (error) {
     console.error('Ошибка создания события:', error);
-    throw new Error('Не удалось создать событие');
+    return { error: 'Не удалось создать событие' };
   }
 
   revalidatePath('/');
+  return { success: true };
 }
 
 // --- НОВОЕ: Подача заявки на сервере ---
 export async function applyToEvent(eventId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Не авторизован');
+  if (!user) return { error: 'Не авторизован' };
 
-    // НОВАЯ ПРОВЕРКА: не организатор ли это?
   const { data: eventCheck } = await supabase
     .from('events')
     .select('organizer_id')
@@ -97,7 +98,7 @@ export async function applyToEvent(eventId: string) {
     .single();
 
   if (eventCheck?.organizer_id === user.id) {
-    throw new Error('Вы не можете подать заявку на свое же событие');
+    return { error: 'Вы не можете подать заявку на свое же событие' };
   }
 
   // 1. Проверяем лимит в 3 активные заявки
@@ -107,8 +108,8 @@ export async function applyToEvent(eventId: string) {
     .eq('user_id', user.id)
     .in('status', ['pending', 'approved']);
 
-  if (countError) throw new Error('Ошибка проверки лимита');
-  if (count && count >= 3) throw new Error('Вы достигли лимита в 3 активные заявки');
+  if (countError) return { error: 'Ошибка проверки лимита' };
+  if (count && count >= 3) return { error: 'Вы достигли лимита в 3 активные заявки' };
 
   // 2. Подаем заявку (статус и user_id жестко заданы на сервере)
   const { error } = await supabase.from('applications').insert([{
@@ -118,8 +119,8 @@ export async function applyToEvent(eventId: string) {
   }]);
 
   if (error) {
-    if (error.code === '23505') throw new Error('Вы уже подали заявку на это событие');
-    throw new Error('Ошибка подачи заявки');
+    if (error.code === '23505') return { error: 'Вы уже подали заявку на это событие' };
+    return { error: 'Ошибка подачи заявки' };
   }
 
   // 3. Уведомление организатору
@@ -134,13 +135,14 @@ export async function applyToEvent(eventId: string) {
 
   revalidatePath('/');
   revalidatePath('/my-events');
+  return { success: true }; // Возвращаем успех
 }
 
 // --- НОВОЕ: Отмена заявки ---
 export async function cancelApplication(eventId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Не авторизован');
+  if (!user) return { error: 'Не авторизован' };
 
   const { error } = await supabase
     .from('applications')
@@ -148,47 +150,150 @@ export async function cancelApplication(eventId: string) {
     .eq('event_id', eventId)
     .eq('user_id', user.id);
 
-  if (error) throw new Error('Не удалось отменить заявку');
+  if (error) return { error: 'Не удалось отменить заявку' };
   
   revalidatePath('/');
   revalidatePath('/my-events');
+  return { success: true };
 }
 
 // --- ОБНОВЛЕНО: Подтверждение заявки (вызов RPC) ---
 export async function approveApplication(applicationId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Не авторизован');
+  if (!user) return { error: 'Не авторизован' };
 
-  // Вызываем RPC функцию
   const { error } = await supabase.rpc('approve_application', { app_id: applicationId });
   
   if (error) {
-    // Переводим техническую ошибку в понятную
-    if (error.message.includes('больше нет свободных мест')) throw new Error('Мест больше нет');
-    throw new Error('Не удалось подтвердить заявку');
+    if (error.message.includes('больше нет свободных мест')) return { error: 'Мест больше нет' };
+    return { error: 'Не удалось подтвердить заявку' };
   }
 
   revalidatePath('/my-events');
   revalidatePath('/');
+  return { success: true };
 }
 
 // --- ОБНОВЛЕНО: Отклонение заявки (вызов RPC) ---
 export async function rejectApplication(applicationId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Не авторизован');
+  if (!user) return { error: 'Не авторизован' };
 
-  // Вызываем RPC функцию
   const { error } = await supabase.rpc('reject_application', { app_id: applicationId });
   
   if (error) {
-    if (error.message.includes('уже обработана')) throw new Error('Эта заявка уже обработана');
-    throw new Error('Не удалось отклонить заявку');
+    if (error.message.includes('уже обработана')) return { error: 'Эта заявка уже обработана' };
+    return { error: 'Не удалось отклонить заявку' };
   }
 
   revalidatePath('/my-events');
+  return { success: true };
+} 
+// --- ОБНОВЛЕНО: Оставить отзыв ---
+export async function leaveReview(eventId: string, rating: number, comment: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Не авторизован' };
+
+  const { data: event } = await supabase.from('events').select('organizer_id').eq('id', eventId).single();
+  if (!event) return { error: 'Событие не найдено' };
+
+  const { error } = await supabase.from('reviews').insert([{
+    event_id: eventId,
+    organizer_id: event.organizer_id,
+    author_id: user.id,
+    rating: rating,
+    comment: comment.trim() || null,
+  }]);
+
+  if (error) {
+    if (error.code === '23505') return { error: 'Вы уже оставляли отзыв на это событие' };
+    if (error.code === '42501') return { error: 'Вы не можете оставить отзыв' };
+    return { error: 'Не удалось сохранить отзыв' };
+  }
+
+  revalidatePath(`/event/${eventId}`);
+  return { success: true };
 }
+
+export async function cancelEvent(eventId: string, reason: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Не авторизован' };
+
+  const { data: event } = await supabase
+    .from('events')
+    .select('id, organizer_id, title')
+    .eq('id', eventId)
+    .single();
+
+  if (!event) return { error: 'Событие не найдено' };
+  if (event.organizer_id !== user.id) return { error: 'Вы не являетесь организатором' };
+
+  // Получаем имя орга для уведомления
+  const { data: profile } = await supabase.from('profiles').select('username').eq('id', user.id).single();
+  const orgName = profile?.username || 'Организатор';
+
+  // Меняем статус на cancelled и сохраняем причину
+  const { error } = await supabase
+    .from('events')
+    .update({ status: 'cancelled', cancel_reason: reason })
+    .eq('id', eventId);
+
+  if (error) return { error: 'Не удалось отменить событие' };
+
+  // Рассылаем уведомления всем участникам (и pending, и approved)
+  const { data: apps } = await supabase.from('applications').select('user_id').eq('event_id', eventId);
+  
+  if (apps && apps.length > 0) {
+    const notifications = apps.map(app => ({
+      user_id: app.user_id,
+      content: `Организатор @${orgName} отменил событие «${event.title}». Причина: ${reason}`,
+      link: `/event/${eventId}`
+    }));
+    await supabase.from('notifications').insert(notifications);
+  }
+
+  revalidatePath('/');
+  revalidatePath('/my-events');
+  return { success: true };
+}
+
+export async function cancelApprovedApplication(eventId: string, reason: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Не авторизован' };
+
+  // Получаем инфу о событии и пользователе
+  const { data: event } = await supabase.from('events').select('organizer_id, title').eq('id', eventId).single();
+  const { data: profile } = await supabase.from('profiles').select('username').eq('id', user.id).single();
+  
+  if (!event) return { error: 'Событие не найдено' };
+  const userName = profile?.username || 'Пользователь';
+
+  // Удаляем заявку (физически), так как человек передумал
+  const { error } = await supabase
+    .from('applications')
+    .delete()
+    .eq('event_id', eventId)
+    .eq('user_id', user.id);
+
+  if (error) return { error: 'Не удалось отменить заявку' };
+
+  // Уведомляем организатора
+  await supabase.from('notifications').insert({
+    user_id: event.organizer_id,
+    content: `Участник @${userName} снял заявку на событие «${event.title}». Причина: ${reason}`,
+    link: `/my-events`
+  });
+  
+  revalidatePath('/');
+  revalidatePath('/my-events');
+  return { success: true };
+}
+
 
 // --- ЧАТ: Отметить как прочитанное ---
 export async function markChatAsRead(eventId: string) {
@@ -263,42 +368,4 @@ export async function getUnreadCounts(eventIds: string[]) {
   }
 
   return counts;
-}
-
-
-// --- ОТЗЫВЫ: Оставить отзыв ---
-export async function leaveReview(eventId: string, rating: number, comment: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Не авторизован');
-
-  // Получаем ID организатора события
-  const { data: event } = await supabase
-    .from('events')
-    .select('organizer_id')
-    .eq('id', eventId)
-    .single();
-
-  if (!event) throw new Error('Событие не найдено');
-
-  // Вставляем отзыв (RLS в базе проверит, что юзер был approved и событие прошло)
-  const { error } = await supabase
-    .from('reviews')
-    .insert([{
-      event_id: eventId,
-      organizer_id: event.organizer_id,
-      author_id: user.id,
-      rating: rating,
-      comment: comment.trim() || null,
-    }]);
-
-  if (error) {
-    if (error.code === '23505') throw new Error('Вы уже оставляли отзыв на это событие');
-    if (error.code === '42501') throw new Error('Вы не можете оставить отзыв (нет прав или событие еще не прошло)');
-    throw new Error('Не удалось сохранить отзыв');
-  }
-
-  // Обновляем кэш страниц
-  revalidatePath(`/event/${eventId}`);
-  revalidatePath('/'); // На случай, если рейтинг как-то влияет на главную
-}
+  } 

@@ -18,6 +18,7 @@ type EventRow = {
   lng: number | null;
   hide_location: boolean;
   is_full: boolean;
+  city: string | null; // <--- 1. ДОБАВЛЕНО В ТИП
   profiles?: { avatar_url: string | null; gender: string | null } | { avatar_url: string | null; gender: string | null }[] | null;
 };
 
@@ -25,10 +26,12 @@ export async function getEventListDTOs(
   supabase: SupabaseClient,
   viewer: ViewerContext,
   limit: number = 10,
-  offset: number = 0
+  offset: number = 0,
+  isArchive: boolean = false
 ): Promise<{ items: EventListItemDTO[]; total: number }> {
-  // 1. Запрос с пагинацией
-  const { data, error, count } = await supabase
+  
+  // 1. Запрос с пагинацией и правильной фильтрацией
+  let query = supabase
     .from('events')
     .select(
       `
@@ -46,16 +49,26 @@ export async function getEventListDTOs(
       lng,
       hide_location,
       is_full,
+      city, 
       profiles!events_organizer_profile_fkey ( avatar_url, gender )
     `,
       { count: 'exact' }
-    )
-    .order('date_time', { ascending: true })
+    );
+
+  // Логика фильтрации по времени (архив или будущие)
+  if (isArchive) {
+    query = query.lt('date_time', new Date().toISOString());
+  } else {
+    query = query.gte('date_time', new Date().toISOString());
+  }
+
+  const { data, error, count } = await query
+    .order('date_time', { ascending: !isArchive })
     .range(offset, offset + limit - 1);
 
   if (error) throw error;
-  const events = (data ?? []) as unknown as EventRow[];
   
+  const events = (data ?? []) as unknown as EventRow[];
   if (events.length === 0) {
     return { items: [], total: count || 0 };
   }
@@ -90,7 +103,7 @@ export async function getEventListDTOs(
     }
   }
 
-  // 4. Считаем непрочитанные (ДО маппинга!)
+  // 4. Считаем непрочитанные
   const unreadCounts = new Map<string, number>();
   if (viewer.kind === 'user') {
     const { data: reads } = await supabase
@@ -103,24 +116,24 @@ export async function getEventListDTOs(
 
     for (const eventId of ids) {
       const lastRead = readMap.get(eventId);
-      let query = supabase
+      let msgQuery = supabase
         .from('messages')
         .select('*', { count: 'exact', head: true })
         .eq('event_id', eventId)
         .neq('user_id', viewer.userId);
 
       if (lastRead) {
-        query = query.gt('created_at', lastRead);
+        msgQuery = msgQuery.gt('created_at', lastRead);
       }
       
-      const { count: msgCount } = await query;
+      const { count: msgCount } = await msgQuery;
       if (msgCount && msgCount > 0) {
         unreadCounts.set(eventId, msgCount);
       }
     }
   }
 
-  // 5. Сборка DTO (после того, как всё посчитано)
+  // 5. Сборка DTO
   const items = events.map((e): EventListItemDTO => {
     const myApp = myStatus.get(e.id) ?? null;
     const allowed = canSeeExactLocation(e, viewer, myApp);
@@ -144,6 +157,7 @@ export async function getEventListDTOs(
         ? 'Место скрыто организатором'
         : e.location,
       locationIsHidden: e.hide_location,
+      city: e.city, // <--- 3. ДОБАВЛЕНО В DTO
       myApplicationStatus: myApp,
       isOrganizer: viewer.kind === 'user' && viewer.userId === e.organizer_id,
       organizerAvatar: profile?.avatar_url ?? null,

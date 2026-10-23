@@ -100,12 +100,19 @@ export default function NotificationsBell() {
 
   return (
     <div className="relative" ref={dropdownRef}>
-      <button
+       <button
         onClick={() => {
           setIsOpen(!isOpen);
           if (!isOpen) markAsRead();
         }}
-        className="relative w-10 h-10 flex items-center justify-center  rounded-brand hover:bg-brand-bg transition-colors"
+        aria-label={
+          unreadCount > 0
+            ? `Уведомления, непрочитанных: ${unreadCount}`
+            : 'Уведомления'
+        }
+        aria-expanded={isOpen}
+        aria-haspopup="true"
+        className="relative w-11 h-11 flex items-center justify-center rounded-brand hover:bg-brand-bg transition-colors"
       >
         🔔
         {unreadCount > 0 && (
@@ -116,7 +123,11 @@ export default function NotificationsBell() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-72 md:w-80 bg-brand-surface border-2 border-brand-line rounded-brand shadow-lg z-50 max-h-96 overflow-y-auto">
+         <div
+          role="dialog"
+          aria-label="Уведомления"
+          className="absolute right-0 mt-2 w-72 md:w-80 bg-brand-surface border-2 border-brand-line rounded-brand shadow-lg z-50 max-h-96 overflow-y-auto"
+        >
           <div className="p-3 border-b-2 border-brand-line font-extrabold uppercase bg-brand-bg sticky top-0">
             Уведомления
           </div>

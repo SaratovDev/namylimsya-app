@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { leaveReview } from '@/app/actions';
 import { useRouter } from 'next/navigation';
+import { useToast } from './Toast';
 
 export default function ReviewForm({ eventId }: { eventId: string }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -12,16 +13,23 @@ export default function ReviewForm({ eventId }: { eventId: string }) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
+   const { showSuccess, showError } = useToast();
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await leaveReview(eventId, rating, comment);
-      alert('Спасибо за ваш отзыв!');
-      setIsOpen(false);
-      router.refresh(); // Обновляем страницу, чтобы кнопка пропала
+      const res = await leaveReview(eventId, rating, comment);
+      if (res?.error) {
+        showError(res.error);
+      } else {
+        showSuccess('Спасибо за ваш отзыв!');
+        setIsOpen(false);
+        router.refresh();
+      }
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Ошибка');
+      showError('Ошибка отправки');
+        console.error(error); // Чтобы ESLint не ругался на неиспользуемый error
     } finally {
       setLoading(false);
     }

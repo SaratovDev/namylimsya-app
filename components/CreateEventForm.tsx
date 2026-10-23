@@ -23,6 +23,17 @@ export default function CreateEventForm() {
   const router = useRouter();
   const { showSuccess, showError } = useToast();
 
+  const [city, setCity] = useState('');
+  
+  useEffect(() => {
+    if (user) {
+      supabase.from('profiles').select('city').eq('id', user.id).single().then(({ data }) => {
+        if (data?.city) setCity(data.city);
+      });
+    }
+  }, [user]);
+
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);
@@ -33,24 +44,26 @@ export default function CreateEventForm() {
   async function handleSubmit(formData: FormData) {
     setIsPending(true);
     try {
-      await createEvent(formData);
+      const res = await createEvent(formData);
       
-      // Сброс полей
+      // Если вернулась ошибка, показываем её и НЕ сбрасываем форму
+      if (res?.error) {
+        showError(res.error);
+        return; 
+      }
+
+      // Если ошибки нет (успех) — сбрасываем форму
       formRef.current?.reset();
       setLocation('');
       setLat(null);
       setLng(null);
       
-      // Успешный тост
       showSuccess('Событие успешно создано!');
-      
-      // Закрываем аккордеон
       formRef.current?.closest('details')?.removeAttribute('open');
       router.refresh();
     } catch (error) {
-      // Выводим точную ошибку (например, "Описание должно быть не короче 10 символов")
-      const message = error instanceof Error ? error.message : 'Ошибка при создании события';
-      showError(message);
+      // Если произошло что-то совсем непредвиденное
+      showError('Произошла непредвиденная ошибка');
     } finally {
       setIsPending(false);
     }
@@ -72,7 +85,15 @@ export default function CreateEventForm() {
   }
 
   return (
-    <form ref={formRef} action={handleSubmit} className="flex flex-col gap-5">
+      <form 
+      ref={formRef} 
+      onSubmit={(e) => {
+        e.preventDefault(); // Останавливаем стандартную отправку формы
+        const formData = new FormData(e.currentTarget);
+        handleSubmit(formData); // Вызываем наш экшен вручную
+      }} 
+      className="flex flex-col gap-5"
+    >
       
       <div className="flex flex-col gap-1.5">
         <label className="text-[12px] font-extrabold uppercase text-brand-muted">Название</label>
@@ -116,6 +137,19 @@ export default function CreateEventForm() {
       </div>
 
       <div className="flex flex-col gap-1.5">
+          <label className="text-[12px] font-extrabold uppercase text-brand-muted">Город события</label>
+          <input 
+            name="city" 
+            type="text" 
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            required
+            placeholder="Выберите город" 
+            className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+          />
+        </div>
+
+      <div className="flex flex-col gap-1.5">
         <label className="text-[12px] font-extrabold uppercase text-brand-muted">Место (кликните на карту)</label>
         <input 
           required 
@@ -131,13 +165,16 @@ export default function CreateEventForm() {
         <input type="hidden" name="lng" value={lng || ''} />
 
         <div className="mt-2">
-        <MapPicker 
-          onLocationSelect={(selectedLat: number, selectedLng: number, address: string) => {
-            setLat(selectedLat);
-            setLng(selectedLng);
-            setLocation(address);
-          }} 
-        />
+<MapPicker 
+  onLocationSelect={(selectedLat, selectedLng, address) => {
+    setLat(selectedLat);
+    setLng(selectedLng);
+    setLocation(address);
+  }} 
+  onCitySelect={(selectedCity) => {
+    setCity(selectedCity); // <--- Автоматически обновляем поле города!
+  }}
+/>
         </div>
       </div>
 

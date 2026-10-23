@@ -13,11 +13,13 @@ const icon = L.icon({
   iconAnchor: [12, 41],
 });
 
+// Добавляем onCitySelect в пропсы (сделаем его необязательным, чтобы карта не ломалась, если его не передали)
 interface MapPickerProps {
   onLocationSelect: (lat: number, lng: number, address: string) => void;
+  onCitySelect?: (city: string) => void;
 }
 
-function LocationMarker({ onLocationSelect }: MapPickerProps) {
+function LocationMarker({ onLocationSelect, onCitySelect }: MapPickerProps) {
   const [position, setPosition] = useState<L.LatLng | null>(null);
 
   useMapEvents({
@@ -28,9 +30,38 @@ function LocationMarker({ onLocationSelect }: MapPickerProps) {
       try {
         const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=ru`);
         const data = await response.json();
-        const address = data.display_name || `Широта: ${lat.toFixed(5)}, Долгота: ${lng.toFixed(5)}`;
         
-        onLocationSelect(lat, lng, address);
+        let shortAddress = data.display_name || `Широта: ${lat.toFixed(5)}, Долгота: ${lng.toFixed(5)}`;
+        
+    // ОБРЕЗАЕМ АДРЕС
+        if (data.address) {
+          const state = data.address.state || data.address.region || ''; // Область/регион
+          const city = data.address.city || data.address.town || data.address.village || '';
+          const road = data.address.road || data.address.pedestrian || data.address.footway || '';
+          const house = data.address.house_number ? `, ${data.address.house_number}` : '';
+          
+          // Формируем красивый короткий адрес
+          if (road) {
+            // Если есть улица, пишем: [Область (если это не город-миллионник), Город, Улица, Дом]
+            // Но чтобы не было "Московская область, Москва" (что странно), область добавляем только если город !== область
+            const statePrefix = (state && city && state !== city) ? state + ', ' : (state && !city ? state + ', ' : '');
+            shortAddress = `${statePrefix}${city ? city + ', ' : ''}${road}${house}`;
+          } else if (city) {
+            // Если улицы нет (например, кликнули в лес), пишем: [Область, Город/Населенный пункт]
+            const statePrefix = (state && state !== city) ? state + ', ' : '';
+            shortAddress = `${statePrefix}${city}`;
+          } else if (state) {
+            // Если вообще ничего нет, кроме области
+            shortAddress = state;
+          }
+          
+          // Автоматически подставляем город (или населенный пункт) в форму
+          if (city && onCitySelect) {
+            onCitySelect(city);
+          }
+        }
+        
+        onLocationSelect(lat, lng, shortAddress);
       } catch (error) {
         console.error("Ошибка геокодинга:", error);
         onLocationSelect(lat, lng, `Широта: ${lat.toFixed(5)}, Долгота: ${lng.toFixed(5)}`);
@@ -51,7 +82,7 @@ function ChangeView({ center }: { center: [number, number] }) {
   return null;
 }
 
-export default function MapPickerComponent({ onLocationSelect }: MapPickerProps) {
+export default function MapPickerComponent({ onLocationSelect, onCitySelect }: MapPickerProps) {
   const [center, setCenter] = useState<[number, number]>([55.751244, 37.618423]); // Москва по умолчанию
   const [isLocating, setIsLocating] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
@@ -83,15 +114,17 @@ export default function MapPickerComponent({ onLocationSelect }: MapPickerProps)
     );
   };
 
-  // Запрашиваем при первой загрузке
   useEffect(() => {
-    requestGeolocation();
+    // Оборачиваем в setTimeout, чтобы ESLint не ругался на синхронный вызов setState
+    const timer = setTimeout(() => {
+      requestGeolocation();
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   return (
     <div className="relative flex flex-col gap-2">
       
-      {/* Панель управления над картой */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button 
           type="button"
@@ -104,7 +137,6 @@ export default function MapPickerComponent({ onLocationSelect }: MapPickerProps)
         </button>
       </div>
 
-      {/* Сообщение об ошибке */}
       {geoError && (
         <div className="bg-brand-heat/10 border-2 border-brand-heat p-2 rounded-brand text-[11px] font-bold text-brand-text">
           {geoError}
@@ -123,7 +155,7 @@ export default function MapPickerComponent({ onLocationSelect }: MapPickerProps)
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <ChangeView center={center} />
-          <LocationMarker onLocationSelect={onLocationSelect} />
+          <LocationMarker onLocationSelect={onLocationSelect} onCitySelect={onCitySelect} />
         </MapContainer>
       </div>
     </div>

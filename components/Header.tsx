@@ -7,8 +7,6 @@ import { useRouter, usePathname } from 'next/navigation';
 import { User } from '@supabase/supabase-js';
 import NotificationsBell from './NotificationsBell';
 
-
-
 // Вспомогательный компонент для пунктов навигации ПК
 function NavItem({ href, label, pathname, badgeCount }: { href: string, label: string, pathname: string, badgeCount?: number }) {
   const isActive = pathname === href;
@@ -23,7 +21,6 @@ function NavItem({ href, label, pathname, badgeCount }: { href: string, label: s
       <span>{label}</span>
       <span className={`text-brand-accent transition-all duration-200 ${isActive ? 'opacity-100' : 'opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0'}`}>]</span>
       
-      {/* Бейдж непрочитанных сообщений */}
       {badgeCount !== undefined && badgeCount > 0 && (
         <span className="absolute -top-2 -right-3 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full border border-brand-bg">
           {badgeCount}
@@ -34,19 +31,23 @@ function NavItem({ href, label, pathname, badgeCount }: { href: string, label: s
 }
 
 export default function Header() {
-
   const [theme, setTheme] = useState('light');
+  
+  // Читаем тему при загрузке
   useEffect(() => {
-    // Считываем тему из localStorage
     const savedTheme = localStorage.getItem('theme') || 'light';
-    setTheme(savedTheme);
-    document.documentElement.setAttribute('data-theme', savedTheme);
+    // Оборачиваем в setTimeout, чтобы ESLint не ругался на синхронный setState
+    const timer = setTimeout(() => {
+      setTheme(savedTheme);
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const [user, setUser] = useState<User | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [unreadChats, setUnreadChats] = useState(0); // Стейт для непрочитанных
+  const [unreadChats, setUnreadChats] = useState(0);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -85,8 +86,7 @@ export default function Header() {
     }
   }, [user]);
 
-   // Логика подсчета непрочитанных сообщений (упрощенная для хедера)
-   // Логика подсчета непрочитанных сообщений
+  // Логика подсчета непрочитанных сообщений
   useEffect(() => {
     if (!user) {
       const timer = setTimeout(() => setUnreadChats(0), 0);
@@ -94,7 +94,6 @@ export default function Header() {
     }
 
     const fetchUnreadCount = async () => {
-      // 1. Получаем все записи о прочтении для этого пользователя
       const { data: reads } = await supabase
         .from('chat_reads')
         .select('event_id, last_read_at')
@@ -102,7 +101,6 @@ export default function Header() {
 
       const readMap = new Map(reads?.map(r => [r.event_id, r.last_read_at]) || []);
 
-      // 2. Получаем последние сообщения (за 7 дней, например)
       const { data: messages } = await supabase
         .from('messages')
         .select('id, event_id, created_at')
@@ -111,7 +109,6 @@ export default function Header() {
 
       if (!messages) return;
 
-      // 3. Считаем только те, которые новее, чем last_read_at
       let count = 0;
       for (const msg of messages) {
         const lastRead = readMap.get(msg.event_id);
@@ -125,7 +122,6 @@ export default function Header() {
 
     fetchUnreadCount();
 
-    // Слушаем новые сообщения и обновления прочтений
     const channel = supabase.channel('header-unread-chats')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
          fetchUnreadCount();
@@ -137,6 +133,7 @@ export default function Header() {
 
     return () => { supabase.removeChannel(channel); };
   }, [user, pathname]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push('/');
@@ -144,7 +141,7 @@ export default function Header() {
     setIsMobileMenuOpen(false);
   };
 
-    const toggleTheme = () => {
+  const toggleTheme = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(newTheme);
     localStorage.setItem('theme', newTheme);
@@ -173,10 +170,10 @@ export default function Header() {
           </nav>
 
           <div className="flex items-center gap-2 md:gap-3 z-50">
-                        <button 
+            <button 
               onClick={toggleTheme}
-              className="w-10 h-10 hidden md:flex items-center justify-center border-2 border-brand-line rounded-brand bg-brand-surface hover:bg-brand-bg transition-colors"
-              title="Сменить тему"
+              aria-label={theme === 'light' ? 'Включить тёмную тему' : 'Включить светлую тему'}
+              className="w-11 h-11 hidden md:flex items-center justify-center border-2 border-brand-line rounded-brand bg-brand-surface hover:bg-brand-bg transition-colors"
             >
               {theme === 'light' ? '🌙' : '☀️'}
             </button>
@@ -210,10 +207,13 @@ export default function Header() {
               </div>
             )}
 
+            {/* Кнопка бургер (возвращены полоски) */}
             <button 
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="md:hidden w-10 h-10 flex flex-col items-center justify-center gap-1.5 border-2 border-brand-line rounded-brand bg-brand-surface"
-              aria-label="Меню"
+              className="md:hidden w-11 h-11 flex flex-col items-center justify-center gap-1.5 border-2 border-brand-line rounded-brand bg-brand-surface"
+              aria-label={isMobileMenuOpen ? 'Закрыть меню' : 'Открыть меню'}
+              aria-expanded={isMobileMenuOpen}
+              aria-controls="mobile-menu"
             >
               <span className={`block w-5 h-0.5 bg-brand-text transition-transform ${isMobileMenuOpen ? 'rotate-45 translate-y-2' : ''}`}></span>
               <span className={`block w-5 h-0.5 bg-brand-text transition-opacity ${isMobileMenuOpen ? 'opacity-0' : ''}`}></span>
@@ -225,6 +225,8 @@ export default function Header() {
 
       {/* Мобильное меню (Шторка) */}
       <div 
+        id="mobile-menu"
+        aria-hidden={!isMobileMenuOpen}
         className={`fixed inset-0 bg-brand-bg z-40 flex flex-col pt-24 px-6 transition-transform duration-300 ease-in-out md:hidden ${
           isMobileMenuOpen ? 'translate-y-0' : '-translate-y-full'
         }`}
@@ -252,14 +254,14 @@ export default function Header() {
           </nav>
         )}
 
-              <div className="mt-auto mb-10 flex flex-col gap-4">
+        <div className="mt-auto mb-10 flex flex-col gap-4">
           
           {/* Кнопка смены темы для мобилок */}
           <button 
             onClick={toggleTheme}
             className="animate-menu-item delay-3 bg-brand-surface text-brand-text font-extrabold text-lg p-3 border-2 border-brand-line rounded-brand flex items-center justify-center gap-2"
           >
-            {theme === 'light' ? '🌙 Темная тема' : '☀️ Светлая тема'}
+            {theme === 'light' ? '🌚 Темная тема' : '🌞 Светлая тема'}
           </button>
 
           {user ? (

@@ -44,6 +44,23 @@
 
   * { box-sizing: border-box; }
   button, input, select, textarea { font: inherit; color: inherit; }
+
+    /* a11y: видимый фокус для клавиатуры, не мешает мыши */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-brand);
+  }
+
+  /* a11y: убираем дефолтный outline только там, где задан focus-visible */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* a11y: ссылки и кнопки не должны терять фокус при переходах */
+  a, button, [role="button"], input, select, textarea, summary {
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 /* Делаем все рамки в проекте тоньше (1px вместо 2px) */

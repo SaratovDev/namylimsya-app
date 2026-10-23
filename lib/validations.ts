@@ -20,6 +20,8 @@ export const createEventSchema = z.object({
     .min(5, 'Название должно быть не короче 5 символов')
     .max(100, 'Название слишком длинное'),
   
+  city: z.string().min(2, 'Укажите город'),
+
   description: z
     .string()
     .trim()

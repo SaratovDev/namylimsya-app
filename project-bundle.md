@@ -1,8 +1,109 @@
 # Project bundle
 
-Generated: 2026-10-22 08:52
+Generated: 2026-10-23 11:34
 Root: C:\Users\Lenovo\Downloads\event_mp\namylimsya-app
 
+## Tree
+
+```
+namylimsya-app/
+|-- __tests__/
+|   \-- e
+|-- app/
+|   |-- [username]/
+|   |   |-- page.tsx
+|   |   \-- page_old.tsx
+|   |-- archive/
+|   |   \-- p
+|   |-- event/
+|   |   \-- [
+|   |-- forgot-password/
+|   |   \-- p
+|   |-- login/
+|   |   \-- p
+|   |-- my-events/
+|   |   |-- loading.tsx
+|   |   \-- page.tsx
+|   |-- reset-password/
+|   |   \-- p
+|   |-- actions.ts
+|   |-- error.tsx
+|   |-- favicon.ico
+|   |-- globals.css
+|   |-- layout.tsx
+|   |-- loading.tsx
+|   |-- not-found.tsx
+|   \-- page.tsx
+|-- components/
+|   |-- ApplicationActions.tsx
+|   |-- AvatarPicker.tsx
+|   |-- CancelModal.tsx
+|   |-- CancelParticipationButton.tsx
+|   |-- CategoryIcon.tsx
+|   |-- ClientMapWrapper.tsx
+|   |-- Countdown.tsx
+|   |-- CreateEventForm.tsx
+|   |-- EventAdminActions.tsx
+|   |-- EventCard.tsx
+|   |-- EventChat.tsx
+|   |-- EventList.tsx
+|   |-- Header.tsx
+|   |-- Map.tsx
+|   |-- MapComponent.tsx
+|   |-- MapPicker.tsx
+|   |-- MapPickerComponent.tsx
+|   |-- MobileFilters.tsx
+|   |-- NotificationsBell.tsx
+|   |-- PageTransition.tsx
+|   |-- ReviewForm.tsx
+|   |-- ScrollToTop.tsx
+|   |-- Sidebar.tsx
+|   \-- Toast.tsx
+|-- lib/
+|   |-- event-access.ts
+|   |-- event-dto.ts
+|   |-- event-queries.ts
+|   |-- supabase.ts
+|   |-- supabase-server.ts
+|   \-- validations.ts
+|-- public/
+|   |-- file.svg
+|   |-- globe.svg
+|   |-- next.svg
+|   |-- vercel.svg
+|   \-- window.svg
+|-- tools/
+|   |-- bundle-project.ps1
+|   |-- bundle-security-md.ps1
+|   \-- project-bundle.md
+|-- .env.local
+|-- .gitignore
+|-- AGENTS.md
+|-- bundle-project.ps1
+|-- eslint.config.mjs
+|-- next.config.ts
+|-- package.json
+|-- postcss.config.mjs
+|-- proxy.ts
+|-- README.md
+|-- security-audit-namylimsya.md
+|-- tsconfig.json
+\-- vitest.config.ts
+```
+
+## Files
+
+### `.env.local`
+
+``bash
+NEXT_PUBLIC_SUPABASE_URL=***REDACTED***
+NEXT_PUBLIC_SUPABASE_ANON_KEY=***REDACTED***
+````
+
+### `.gitignore`
+
+``
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
 /node_modules
@@ -111,30 +212,198 @@ import { getEventListDTOs } from '@/lib/event-queries';
 
 export default async function ProfilePage({ params }: { params: Promise<{ username: string }> }) {
   const { username } = await params;
-  const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
+  let cleanUsername = decodeURIComponent(username);
+  if (cleanUsername.startsWith('@')) cleanUsername = cleanUsername.slice(1);
   
   const supabase = await createClient(); 
-  
-  // 1. Получаем данные текущего пользователя
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 2. Получаем профиль того, на чью страницу зашли
+  // 1. Ищем профиль
   const { data: profile } = await supabase
     .from('profiles')
     .select('*')
-    .eq('username', cleanUsername)
+    .ilike('username', cleanUsername)
     .single();
 
   if (!profile) notFound();
 
   const isOwnProfile = user?.id === profile.id;
 
+  // 2. Получаем рейтинг организатора (вызов RPC)
+  const { data: ratingData } = await supabase
+    .rpc('get_organizer_rating', { org_id: profile.id })
+    .single<{ average_rating: number; total_reviews: number }>();
+
+  const rating = ratingData?.average_rating || 0;
+  const reviewsCount = ratingData?.total_reviews || 0;
+
   // 3. Получаем безопасные DTO событий
-  // Мы берем ВСЕ события, а затем фильтруем по автору. 
-  // (В идеале для производительности стоит добавить фильтр по organizer_id внутри getEventListDTOs, 
-  // но для текущего объема данных это работает и защищает от утечки).
-   const viewer = await getViewer(supabase);
-  // Передаем limit=1000, чтобы на странице профиля показать все события (или можно добавить пагинацию, но пока так)
+  const viewer = await getViewer(supabase);
+  const { items: allEvents } = await getEventListDTOs(supabase, viewer, 1000, 0);
+  const userEvents = allEvents.filter(e => e.organizerId === profile.id);
+
+  // 4. Получаем последние 5 отзывов для отображения
+  const { data: recentReviews } = await supabase
+    .from('reviews')
+    .select(`
+      id, rating, comment, created_at,
+      events ( title ),
+      author:profiles!reviews_author_id_fkey ( username, avatar_url )
+    `)
+    .eq('organizer_id', profile.id)
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  const avatarLetter = profile.username.charAt(0).toUpperCase();
+  const genderIcon = profile.gender === 'male' ? '♂' : profile.gender === 'female' ? '♀' : '';
+
+  return (
+    <main className="max-w-[1280px] mx-auto px-6 py-10 min-h-screen">
+      
+      {/* Шапка профиля */}
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8 mb-8 flex flex-col md:flex-row items-center gap-6">
+        
+        {/* Аватарка */}
+        <div className="flex flex-col items-center gap-3">
+          <div className={`w-24 h-24 rounded-full border-2 border-brand-line flex items-center justify-center text-4xl font-extrabold flex-shrink-0 overflow-hidden
+            ${profile.gender === 'male' ? 'bg-blue-100 text-blue-800' : 
+              profile.gender === 'female' ? 'bg-pink-100 text-pink-800' : 
+              'bg-gray-200 text-gray-700'}
+          `}>
+            {profile.avatar_url ? (
+              <div className="w-full h-full">
+                <Image src={profile.avatar_url} alt={profile.username} width={96} height={96} className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              avatarLetter
+            )}
+          </div>
+          {isOwnProfile && (
+            <AvatarPicker 
+              currentAvatar={profile.avatar_url} 
+              gender={profile.gender} 
+              username={profile.username} 
+              userId={profile.id} 
+            />
+          )}
+        </div>
+
+        {/* Инфо */}
+        <div className="text-center md:text-left flex-1">
+          <h1 className="text-3xl font-extrabold uppercase mb-1 flex items-center justify-center md:justify-start gap-2">
+            @{profile.username}
+            {genderIcon && <span className="text-brand-accent text-xl">{genderIcon}</span>}
+          </h1>
+          <p className="text-brand-muted font-bold mb-2">Организатор событий в «Намылимся»</p>
+          
+          {/* Плашка рейтинга */}
+          {reviewsCount >= 3 ? (
+            <div className="inline-flex items-center gap-1.5 bg-brand-bg px-3 py-1 rounded border-2 border-brand-line mb-4">
+              <span className="text-yellow-500 text-lg leading-none">★</span>
+              <span className="font-extrabold text-lg">{rating}</span>
+              <span className="text-brand-muted text-sm font-bold">({reviewsCount} отзывов)</span>
+            </div>
+          ) : (
+            <div className="inline-block bg-brand-bg px-3 py-1 rounded border-2 border-brand-line mb-4 text-sm font-bold text-brand-muted">
+              Новый организатор
+            </div>
+          )}
+
+          {profile.bio && (
+            <p className="text-sm font-medium bg-brand-bg p-3 rounded-brand border-2 border-brand-line inline-block">
+              {profile.bio}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Блок отзывов */}
+      {recentReviews && recentReviews.length > 0 && (
+        <div className="mb-10">
+          <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Последние отзывы</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+           
+            {recentReviews.map((review: { id: string; rating: number; comment: string | null; created_at: string; events: any; author: any; }) => {
+              const event = Array.isArray(review.events) ? review.events[0] : review.events;
+              const author = Array.isArray(review.author) ? review.author[0] : review.author;
+              
+              return (
+                <div key={review.id} className="bg-brand-surface border-2 border-brand-line rounded-brand p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold text-sm">@{author?.username || 'Пользователь'}</span>
+                    <div className="flex text-yellow-500 text-sm">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <span key={i}>{i < review.rating ? '★' : '☆'}</span>
+                      ))}
+                    </div>
+                  </div>
+                  {event && <div className="text-[11px] text-brand-muted font-bold mb-2 uppercase">Событие: {event.title}</div>}
+                  {review.comment && <p className="text-sm italic text-brand-text/80">`&quot`{review.comment}`&quot`</p>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Созданные события</h2>
+      
+      <div className="flex flex-col gap-6">
+        {userEvents.length === 0 ? (
+          <p className="text-brand-muted font-bold">Этот пользователь пока не создавал событий.</p>
+        ) : (
+          userEvents.map((item) => (
+            <EventCard key={item.id} item={item} />
+          ))
+        )}
+      </div>
+    </main>
+  );
+}
+````
+
+### `app/[username]/page_old.tsx`
+
+``tsx
+import { createClient } from '@/lib/supabase-server';
+import { notFound } from 'next/navigation';
+import EventCard from '@/components/EventCard';
+import AvatarPicker from '@/components/AvatarPicker';
+import Image from 'next/image';
+import { getViewer } from '@/lib/event-access';
+import { getEventListDTOs } from '@/lib/event-queries';
+
+export default async function ProfilePage({ params }: { params: Promise<{ username: string }> }) {
+  const { username } = await params;
+  
+  // 1. Декодируем URL (на случай, если Next.js не сделал этого автоматически)
+  // и убираем собачку @, если она есть
+  let cleanUsername = decodeURIComponent(username);
+  if (cleanUsername.startsWith('@')) {
+    cleanUsername = cleanUsername.slice(1);
+  }
+  
+  const supabase = await createClient(); 
+  
+  const { data: { user } } = await supabase.auth.getUser();
+
+  // 2. Ищем профиль через ilike (регистронезависимый поиск)
+  // Это спасет от проблем с регистром (Vasya и vasya) и частично с кодировкой
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('*')
+    .ilike('username', cleanUsername)
+    .single();
+
+  if (!profile) {
+    console.error(`Профиль с ником "${cleanUsername}" не найден в БД`);
+    notFound();
+  }
+
+  const isOwnProfile = user?.id === profile.id;
+
+  // 3. Получаем безопасные DTO событий
+  const viewer = await getViewer(supabase);
   const { items: allEvents } = await getEventListDTOs(supabase, viewer, 1000, 0);
   
   // Фильтруем события, оставляя только те, что создал этот пользователь
@@ -228,18 +497,26 @@ export async function createEvent(formData: FormData) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  if (authError || !user) throw new Error('Необходимо войти в аккаунт');
+  if (authError || !user) return { error: 'Необходимо войти в аккаунт' };
 
-  // 1. Собираем "сырые" данные из формы (date и time отдельно)
+  // ПРОВЕРКА ЛИМИТА
+  const { count: activeEvents, error: countError } = await supabase
+    .from('events')
+    .select('*', { count: 'exact', head: true })
+    .eq('organizer_id', user.id)
+    .gte('date_time', new Date().toISOString());
+
+  if (countError) return { error: 'Не удалось проверить лимит событий' };
+  if (activeEvents && activeEvents >= 2) {
+    return { error: 'У вас уже есть 2 активных события. Дождитесь их завершения, чтобы создать новое.' };
+  }
+
+  // 1. Сбор данных
   const dateStr = formData.get('date') as string | null;
   const timeStr = formData.get('time') as string | null;
   
-  // Проверяем наличие даты/времени до сборки
-  if (!dateStr || !timeStr) {
-    throw new Error('Укажите дату и время события');
-  }
+  if (!dateStr || !timeStr) return { error: 'Укажите дату и время события' };
 
-  // 2. Формируем объект для валидации (включая объединение даты и времени)
   const rawData = {
     title: formData.get('title'),
     description: formData.get('description'),
@@ -248,22 +525,22 @@ export async function createEvent(formData: FormData) {
     max_participants: formData.get('max_participants'),
     lat: formData.get('lat') || null,
     lng: formData.get('lng') || null,
-    date_time: `${dateStr}T${timeStr}`, // Получится, например, "2026-10-25T18:30"
+    date_time: `${dateStr}T${timeStr}`,
     hide_location: formData.get('hide_location') === 'on',
+    city: formData.get('city'),
   };
 
-  // 3. Валидируем данные с помощью Zod
+  // 2. Валидация
   const result = createEventSchema.safeParse(rawData);
   
   if (!result.success) {
-    // Достаем первую ошибку, чтобы показать пользователю
-  const firstError = result.error.issues[0]?.message || 'Некорректные данные';
-    throw new Error(firstError);
+    const firstError = result.error.issues[0]?.message || 'Некорректные данные';
+    return { error: firstError };
   }
 
-  const { title, description, category, location, max_participants, lat, lng, date_time, hide_location } = result.data;
+  const { title, description, city, category, location, max_participants, lat, lng, date_time, hide_location } = result.data;
 
-  // 4. Получаем никнейм организатора
+  // 3. Никнейм организатора
   const { data: profile } = await supabase
     .from('profiles')
     .select('username')
@@ -272,39 +549,32 @@ export async function createEvent(formData: FormData) {
 
   const organizerName = profile?.username || 'Пользователь';
 
-  // 5. Вставляем только проверенные данные
+  // 4. Вставка в БД
   const { error } = await supabase
     .from('events')
     .insert([{
-      title,
-      description,
-      category,
-      date_time,
-      location,
-      lat,
-      lng,
-      max_participants,
-      hide_location,
+      title, description, category, date_time, location, lat, lng, max_participants, hide_location,
       organizer_name: organizerName,
       organizer_id: user.id,
-      organizer_rank: 'Инициатор', // Жестко задано на сервере
+      organizer_rank: 'Инициатор',
+      city,
     }]);
 
   if (error) {
     console.error('Ошибка создания события:', error);
-    throw new Error('Не удалось создать событие');
+    return { error: 'Не удалось создать событие' };
   }
 
   revalidatePath('/');
+  return { success: true };
 }
 
 // --- НОВОЕ: Подача заявки на сервере ---
 export async function applyToEvent(eventId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Не авторизован');
+  if (!user) return { error: 'Не авторизован' };
 
-    // НОВАЯ ПРОВЕРКА: не организатор ли это?
   const { data: eventCheck } = await supabase
     .from('events')
     .select('organizer_id')
@@ -312,7 +582,7 @@ export async function applyToEvent(eventId: string) {
     .single();
 
   if (eventCheck?.organizer_id === user.id) {
-    throw new Error('Вы не можете подать заявку на свое же событие');
+    return { error: 'Вы не можете подать заявку на свое же событие' };
   }
 
   // 1. Проверяем лимит в 3 активные заявки
@@ -322,8 +592,8 @@ export async function applyToEvent(eventId: string) {
     .eq('user_id', user.id)
     .in('status', ['pending', 'approved']);
 
-  if (countError) throw new Error('Ошибка проверки лимита');
-  if (count && count >= 3) throw new Error('Вы достигли лимита в 3 активные заявки');
+  if (countError) return { error: 'Ошибка проверки лимита' };
+  if (count && count >= 3) return { error: 'Вы достигли лимита в 3 активные заявки' };
 
   // 2. Подаем заявку (статус и user_id жестко заданы на сервере)
   const { error } = await supabase.from('applications').insert([{
@@ -333,8 +603,8 @@ export async function applyToEvent(eventId: string) {
   }]);
 
   if (error) {
-    if (error.code === '23505') throw new Error('Вы уже подали заявку на это событие');
-    throw new Error('Ошибка подачи заявки');
+    if (error.code === '23505') return { error: 'Вы уже подали заявку на это событие' };
+    return { error: 'Ошибка подачи заявки' };
   }
 
   // 3. Уведомление организатору
@@ -349,13 +619,14 @@ export async function applyToEvent(eventId: string) {
 
   revalidatePath('/');
   revalidatePath('/my-events');
+  return { success: true }; // Возвращаем успех
 }
 
 // --- НОВОЕ: Отмена заявки ---
 export async function cancelApplication(eventId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Не авторизован');
+  if (!user) return { error: 'Не авторизован' };
 
   const { error } = await supabase
     .from('applications')
@@ -363,46 +634,338 @@ export async function cancelApplication(eventId: string) {
     .eq('event_id', eventId)
     .eq('user_id', user.id);
 
-  if (error) throw new Error('Не удалось отменить заявку');
+  if (error) return { error: 'Не удалось отменить заявку' };
   
   revalidatePath('/');
   revalidatePath('/my-events');
+  return { success: true };
 }
 
 // --- ОБНОВЛЕНО: Подтверждение заявки (вызов RPC) ---
 export async function approveApplication(applicationId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Не авторизован');
+  if (!user) return { error: 'Не авторизован' };
 
-  // Вызываем RPC функцию
   const { error } = await supabase.rpc('approve_application', { app_id: applicationId });
   
   if (error) {
-    // Переводим техническую ошибку в понятную
-    if (error.message.includes('больше нет свободных мест')) throw new Error('Мест больше нет');
-    throw new Error('Не удалось подтвердить заявку');
+    if (error.message.includes('больше нет свободных мест')) return { error: 'Мест больше нет' };
+    return { error: 'Не удалось подтвердить заявку' };
   }
 
   revalidatePath('/my-events');
   revalidatePath('/');
+  return { success: true };
 }
 
 // --- ОБНОВЛЕНО: Отклонение заявки (вызов RPC) ---
 export async function rejectApplication(applicationId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Не авторизован');
+  if (!user) return { error: 'Не авторизован' };
 
-  // Вызываем RPC функцию
   const { error } = await supabase.rpc('reject_application', { app_id: applicationId });
   
   if (error) {
-    if (error.message.includes('уже обработана')) throw new Error('Эта заявка уже обработана');
-    throw new Error('Не удалось отклонить заявку');
+    if (error.message.includes('уже обработана')) return { error: 'Эта заявка уже обработана' };
+    return { error: 'Не удалось отклонить заявку' };
   }
 
   revalidatePath('/my-events');
+  return { success: true };
+} 
+// --- ОБНОВЛЕНО: Оставить отзыв ---
+export async function leaveReview(eventId: string, rating: number, comment: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Не авторизован' };
+
+  const { data: event } = await supabase.from('events').select('organizer_id').eq('id', eventId).single();
+  if (!event) return { error: 'Событие не найдено' };
+
+  const { error } = await supabase.from('reviews').insert([{
+    event_id: eventId,
+    organizer_id: event.organizer_id,
+    author_id: user.id,
+    rating: rating,
+    comment: comment.trim() || null,
+  }]);
+
+  if (error) {
+    if (error.code === '23505') return { error: 'Вы уже оставляли отзыв на это событие' };
+    if (error.code === '42501') return { error: 'Вы не можете оставить отзыв' };
+    return { error: 'Не удалось сохранить отзыв' };
+  }
+
+  revalidatePath(`/event/${eventId}`);
+  return { success: true };
+}
+
+export async function cancelEvent(eventId: string, reason: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Не авторизован' };
+
+  const { data: event } = await supabase
+    .from('events')
+    .select('id, organizer_id, title')
+    .eq('id', eventId)
+    .single();
+
+  if (!event) return { error: 'Событие не найдено' };
+  if (event.organizer_id !== user.id) return { error: 'Вы не являетесь организатором' };
+
+  // Получаем имя орга для уведомления
+  const { data: profile } = await supabase.from('profiles').select('username').eq('id', user.id).single();
+  const orgName = profile?.username || 'Организатор';
+
+  // Меняем статус на cancelled и сохраняем причину
+  const { error } = await supabase
+    .from('events')
+    .update({ status: 'cancelled', cancel_reason: reason })
+    .eq('id', eventId);
+
+  if (error) return { error: 'Не удалось отменить событие' };
+
+  // Рассылаем уведомления всем участникам (и pending, и approved)
+  const { data: apps } = await supabase.from('applications').select('user_id').eq('event_id', eventId);
+  
+  if (apps && apps.length > 0) {
+    const notifications = apps.map(app => ({
+      user_id: app.user_id,
+      content: `Организатор @${orgName} отменил событие «${event.title}». Причина: ${reason}`,
+      link: `/event/${eventId}`
+    }));
+    await supabase.from('notifications').insert(notifications);
+  }
+
+  revalidatePath('/');
+  revalidatePath('/my-events');
+  return { success: true };
+}
+
+export async function cancelApprovedApplication(eventId: string, reason: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Не авторизован' };
+
+  // Получаем инфу о событии и пользователе
+  const { data: event } = await supabase.from('events').select('organizer_id, title').eq('id', eventId).single();
+  const { data: profile } = await supabase.from('profiles').select('username').eq('id', user.id).single();
+  
+  if (!event) return { error: 'Событие не найдено' };
+  const userName = profile?.username || 'Пользователь';
+
+  // Удаляем заявку (физически), так как человек передумал
+  const { error } = await supabase
+    .from('applications')
+    .delete()
+    .eq('event_id', eventId)
+    .eq('user_id', user.id);
+
+  if (error) return { error: 'Не удалось отменить заявку' };
+
+  // Уведомляем организатора
+  await supabase.from('notifications').insert({
+    user_id: event.organizer_id,
+    content: `Участник @${userName} снял заявку на событие «${event.title}». Причина: ${reason}`,
+    link: `/my-events`
+  });
+  
+  revalidatePath('/');
+  revalidatePath('/my-events');
+  return { success: true };
+}
+
+
+// --- ЧАТ: Отметить как прочитанное ---
+export async function markChatAsRead(eventId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  // 1. Пробуем обновить существующую запись
+  const { data: updated, error: updateError } = await supabase
+    .from('chat_reads')
+    .update({ last_read_at: new Date().toISOString() })
+    .eq('user_id', user.id)
+    .eq('event_id', eventId)
+    .select();
+
+  if (updateError) {
+    console.error('Ошибка обновления прочтения:', updateError);
+    return;
+  }
+
+  // 2. Если записи не было (0 строк обновлено), создаем новую
+  if (!updated || updated.length === 0) {
+    const { error: insertError } = await supabase
+      .from('chat_reads')
+      .insert({ 
+        user_id: user.id, 
+        event_id: eventId, 
+        last_read_at: new Date().toISOString() 
+      });
+      
+    if (insertError) {
+      console.error('Ошибка создания записи прочтения:', insertError);
+    }
+  }
+}
+
+// --- ЧАТ: Получить количество непрочитанных для списка событий ---
+export async function getUnreadCounts(eventIds: string[]) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user || eventIds.length === 0) return {};
+
+  // 1. Получаем время последнего прочтения для каждого чата
+  const { data: reads } = await supabase
+    .from('chat_reads')
+    .select('event_id, last_read_at')
+    .in('event_id', eventIds)
+    .eq('user_id', user.id);
+
+  const readMap = new Map(reads?.map(r => [r.event_id, r.last_read_at]) || []);
+
+  // 2. Считаем количество сообщений после времени прочтения для каждого чата
+  const counts: Record<string, number> = {};
+  
+  for (const eventId of eventIds) {
+    const lastRead = readMap.get(eventId);
+    
+    let query = supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('event_id', eventId)
+      .neq('user_id', user.id); // Не считаем свои сообщения
+
+    if (lastRead) {
+      query = query.gt('created_at', lastRead);
+    }
+
+    const { count } = await query;
+    if (count && count > 0) {
+      counts[eventId] = count;
+    }
+  }
+
+  return counts;
+  } 
+````
+
+### `app/archive/page.tsx`
+
+``tsx
+import { createClient } from '@/lib/supabase-server';
+import { getViewer } from '@/lib/event-access';
+import { getEventListDTOs } from '@/lib/event-queries';
+import EventCard from '@/components/EventCard';
+import Link from 'next/link';
+
+export default async function ArchivePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const params = await searchParams;
+  const currentPage = Number(params.page) || 1;
+  const limit = 10;
+  const offset = (currentPage - 1) * limit;
+
+  const supabase = await createClient();
+  const viewer = await getViewer(supabase);
+
+  const { items, total } = await getEventListDTOs(supabase, viewer, limit, offset, true); // true = архив
+  const hasMore = offset + items.length < total;
+
+   return (
+    <main className="max-w-[1100px] mx-auto px-4 md:px-6 py-10 min-h-screen">
+      <h1 className="text-3xl font-extrabold uppercase mb-8 border-b-2 border-brand-line pb-4">
+        Архив событий
+      </h1>
+
+      {items.length === 0 ? (
+        <div className="text-center py-10 border-2 border-dashed border-brand-line rounded-brand-lg text-brand-muted font-bold">
+          В архиве пока нет завершенных событий.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-8">
+          {/* Сетка карточек: 1 колонка на мобилках, 2 на ПК */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {items.map((item) => (
+              <div key={item.id} className="h-full">
+                <EventCard item={item} />
+              </div>
+            ))}
+          </div>
+
+          {hasMore && (
+            <div className="text-center mt-4">
+              <Link
+                href={`/archive?page=${currentPage + 1}`}
+                className="inline-block px-6 py-3 bg-brand-surface border-2 border-brand-line rounded-brand font-extrabold uppercase hover:bg-brand-bg transition-colors"
+              >
+                Показать ещё
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+    </main>
+  );
+}
+````
+
+### `app/error.tsx`
+
+``tsx
+'use client';
+
+import { useEffect } from 'react';
+import Link from 'next/link';
+
+export default function GlobalError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    // Логируем ошибку в консоль (в будущем сюда можно подключить Sentry)
+    console.error('Глобальная ошибка приложения:', error);
+  }, [error]);
+
+  return (
+    <main className="max-w-md mx-auto mt-20 px-6">
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8 text-center">
+        <div className="text-5xl mb-4">💥</div>
+        <h1 className="text-2xl font-extrabold uppercase mb-4">
+          Что-то пошло не так
+        </h1>
+        <p className="text-brand-muted font-bold mb-6">
+          Произошла непредвиденная ошибка. Мы уже работаем над этим. Попробуйте обновить страницу.
+        </p>
+        
+        <div className="flex flex-col gap-3">
+          <button
+            onClick={() => reset()}
+            className="bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors"
+          >
+            Попробовать снова
+          </button>
+          <Link
+            href="/"
+            className="bg-brand-bg text-brand-text font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-surface transition-colors"
+          >
+            Вернуться на главную
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
 }
 ````
 
@@ -411,9 +974,222 @@ export async function rejectApplication(applicationId: string) {
 ``tsx
 import { createClient } from '@/lib/supabase-server';
 import { notFound } from 'next/navigation';
-import Map from '@/components/MapComponent';
+import Link from 'next/link';
+import Image from 'next/image';
+import ClientMapWrapper from '@/components/ClientMapWrapper';
+import EventChat from '@/components/EventChat';
+import ReviewForm from '@/components/ReviewForm';
+import { getViewer } from '@/lib/event-access';
+import { canSeeExactLocation } from '@/lib/event-access';
+import ScrollToTop from '@/components/ScrollToTop';
+import EventAdminActions from '@/components/EventAdminActions';
+import CancelParticipationButton from '@/components/CancelParticipationButton';
+
+
+export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const viewer = await getViewer(supabase);
+
+  const { data: event } = await supabase
+    .from('events')
+    .select(`
+      *,
+      profiles!events_organizer_profile_fkey ( username, avatar_url, gender )
+    `)
+    .eq('id', id)
+    .single();
+
+  if (!event) notFound();
+
+  let myAppStatus = null;
+  if (viewer.kind === 'user') {
+    const { data: app } = await supabase
+      .from('applications')
+      .select('status')
+      .eq('event_id', id)
+      .eq('user_id', viewer.userId)
+      .maybeSingle();
+    myAppStatus = app?.status || null;
+  }
+
+  const canSeeLocation = canSeeExactLocation(event, viewer, myAppStatus);
+  const hasExactCoords = typeof event.lat === 'number' && typeof event.lng === 'number' && canSeeLocation;
+  const isOrganizer = viewer.kind === 'user' && viewer.userId === event.organizer_id;
+
+    // Считаем событие прошедшим через 24 часа после начала
+  const eventEndTime = new Date(event.date_time).getTime() + 24 * 60 * 60 * 1000;
+  const isPast = eventEndTime < new Date().getTime();
+
+  let canReview = false;
+  if (viewer.kind === 'user' && isPast && myAppStatus === 'approved') {
+    const { data: existingReview } = await supabase
+      .from('reviews')
+      .select('id')
+      .eq('event_id', id)
+      .eq('author_id', viewer.userId)
+      .maybeSingle();
+      
+    if (!existingReview) canReview = true;
+  }
+
+  const { data: eventRating } = await supabase
+    .rpc('get_event_rating', { ev_id: id })
+    .single<{ average_rating: number; total_reviews: number }>();
+
+  const d = new Date(event.date_time);
+  const dateStr = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  const timeStr = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const organizer = Array.isArray(event.profiles) ? event.profiles[0] : event.profiles;
+
+  return (
+    <main className="max-w-[1100px] mx-auto px-4 md:px-6 py-10 min-h-screen">
+      <ScrollToTop />
+      <Link href="/" className="text-brand-muted font-bold text-sm uppercase hover:text-brand-accent transition-colors mb-6 inline-block">
+        ← Вернуться в ленту
+      </Link>
+
+      {/* Шапка события */}
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 md:p-8 mb-6 relative">
+        <div className="flex flex-col md:flex-row justify-between gap-6">
+          
+          <div className="flex-1">
+            <span className="text-[10px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-1 rounded border border-brand-cat/30 mb-4 inline-block">
+              {event.category}
+            </span>
+            <h1 className="text-3xl md:text-4xl font-extrabold leading-tight mb-4">{event.title}</h1>
+            
+            <div className="flex flex-col gap-2 text-sm font-bold text-brand-muted">
+              <p className="flex items-center gap-2">
+                <span className="text-brand-accent text-lg">🗓</span>
+                {dateStr} в {timeStr}
+              </p>
+              <p className="flex items-center gap-2">
+                <span className="text-brand-accent text-lg">📍</span>
+                <span>
+                  {event.city ? `${event.city}, ` : ''}
+                  {canSeeLocation ? event.location : "Место скрыто организатором"}
+                </span>
+              </p>
+              
+              {isPast && (
+                <div className="mt-2 inline-block bg-brand-bg border-2 border-brand-line px-3 py-1 rounded text-brand-muted font-extrabold text-xs uppercase">
+                  Событие уже прошло
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Организатор и Рейтинг в шапке */}
+          <div className="flex flex-col gap-3 min-w-[200px]">
+            <div className="bg-brand-bg p-4 rounded-brand border-2 border-brand-line flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex-shrink-0">
+                 {organizer?.avatar_url ? (
+                   <Image src={organizer.avatar_url} alt={event.organizer_name} width={40} height={40} className="object-cover w-full h-full" />
+                 ) : (
+                   <div className="w-full h-full flex items-center justify-center font-extrabold text-gray-500">
+                     {event.organizer_name.charAt(0)}
+                   </div>
+                 )}
+              </div>
+              <div>
+                <p className="text-[10px] font-extrabold uppercase text-brand-muted">Организатор</p>
+                <Link href={`/@${organizer?.username || event.organizer_name}`} className="font-bold hover:text-brand-accent">
+                  @{organizer?.username || event.organizer_name}
+                </Link>
+              </div>
+            </div>
+
+            <div className="bg-brand-bg p-3 rounded-brand border-2 border-brand-line text-center">
+              <h3 className="text-[10px] font-extrabold uppercase text-brand-muted mb-1">Рейтинг события</h3>
+              {eventRating && eventRating.total_reviews > 0 ? (
+                <div className="flex items-center justify-center gap-1">
+                  <span className="text-xl font-extrabold">{eventRating.average_rating}</span>
+                  <span className="text-yellow-500 text-lg">★</span>
+                  <span className="text-xs text-brand-muted font-bold ml-1">({eventRating.total_reviews})</span>
+                </div>
+              ) : (
+                <p className="text-xs font-bold text-brand-muted">Пока нет отзывов</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+          {isOrganizer && (
+            <div className="mt-4 pt-4 border-t-2 border-dashed border-brand-line">
+              <EventAdminActions eventId={event.id} eventTitle={event.title} />
+            </div>
+          )}
+
+          {myAppStatus === 'approved' && (
+          <div className="mt-4">
+            <CancelParticipationButton eventId={event.id} eventTitle={event.title} />
+          </div>
+        )}
+
+      {/* Кнопка оставить отзыв */}
+      {canReview && (
+        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 mb-6">
+          <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Поделитесь впечатлениями</h2>
+          <ReviewForm eventId={event.id} />
+        </div>
+      )}
+
+      {/* Сетка: Чат слева, Описание и Локация справа */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_350px] gap-6">
+        
+        {/* ЛЕВАЯ КОЛОНКА (Чат) */}
+        <div>
+          {(isOrganizer || myAppStatus === 'approved' || myAppStatus === 'pending') && viewer.kind === 'user' ? (
+            <EventChat eventId={event.id} currentUserId={viewer.userId} />
+          ) : (
+            <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 text-center h-full flex flex-col justify-center items-center">
+              <span className="text-4xl mb-4">💬</span>
+              <h2 className="text-xl font-extrabold uppercase mb-2">Чат события</h2>
+              <p className="text-brand-muted font-bold max-w-xs">Чат доступен только организатору и участникам с поданной заявкой.</p>
+            </div>
+          )}
+        </div>
+
+        {/* ПРАВАЯ КОЛОНКА (Описание + Карта) */}
+        <div className="flex flex-col gap-6">
+          
+          {/* Описание */}
+          <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
+            <h2 className="text-lg font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Описание</h2>
+            <p className="text-brand-text whitespace-pre-wrap leading-relaxed text-sm">{event.description}</p>
+          </div>
+
+          {/* Локация */}
+          <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
+            <h2 className="text-lg font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Локация</h2>
+            {hasExactCoords ? (
+              <ClientMapWrapper lat={event.lat} lng={event.lng} title={event.title} />
+            ) : (
+              <div className="h-48 bg-brand-bg border-2 border-dashed border-brand-line rounded flex items-center justify-center text-brand-muted font-bold text-center p-4 text-sm">
+                Точное место откроется после подтверждения вашей заявки.
+              </div>
+            )}
+          </div>
+
+        </div>
+
+      </div>
+    </main>
+  );
+}
+````
+
+### `app/event/[id]/page_old.tsx`
+
+``tsx
+import { createClient } from '@/lib/supabase-server';
+import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import EventChat from '@/components/EventChat';
+import ClientMapWrapper from '@/components/ClientMapWrapper';
+
 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -432,6 +1208,8 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
     .single();
 
   if (!event) notFound();
+
+  
 
   // Проверяем, подавал ли текущий пользователь заявку
   let application = null;
@@ -493,7 +1271,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         <p className="font-bold text-brand-muted mb-4">{event.location}</p>
         
                {event.lat && event.lng ? (
-          <Map 
+          <ClientMapWrapper
             lat={event.lat} 
             lng={event.lng} 
             title={event.title} 
@@ -532,6 +1310,83 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 ### `app/favicon.ico`
 
 _binary file, content skipped_
+
+### `app/forgot-password/page.tsx`
+
+``tsx
+'use client';
+
+import { useState } from 'react';
+import Link from 'next/link';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/components/Toast';
+
+export default function ForgotPasswordPage() {
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { showSuccess, showError } = useToast();
+
+  const handleReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      
+      if (error) throw error;
+      
+      showSuccess('Письмо для сброса пароля отправлено на вашу почту!');
+      setEmail('');
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Ошибка отправки');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="max-w-md mx-auto mt-20 px-6">
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8">
+        <h1 className="text-2xl font-extrabold uppercase mb-6 text-center">
+          Сброс пароля
+        </h1>
+        <p className="text-sm text-brand-muted font-bold text-center mb-6">
+          Введите email, привязанный к аккаунту. Мы отправим ссылку для создания нового пароля.
+        </p>
+
+        <form onSubmit={handleReset} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Email</label>
+            <input 
+              type="email" 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              required
+              placeholder="your@email.com"
+              className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+            />
+          </div>
+
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="mt-2 bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Отправка...' : 'Отправить ссылку'}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center">
+          <Link href="/login" className="text-sm font-bold text-brand-muted hover:text-brand-accent transition-colors">
+            ← Вернуться ко входу
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+````
 
 ### `app/globals.css`
 
@@ -582,6 +1437,23 @@ _binary file, content skipped_
 
   * { box-sizing: border-box; }
   button, input, select, textarea { font: inherit; color: inherit; }
+
+    /* a11y: видимый фокус для клавиатуры, не мешает мыши */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-brand);
+  }
+
+  /* a11y: убираем дефолтный outline только там, где задан focus-visible */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* a11y: ссылки и кнопки не должны терять фокус при переходах */
+  a, button, [role="button"], input, select, textarea, summary {
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 /* Делаем все рамки в проекте тоньше (1px вместо 2px) */
@@ -661,6 +1533,14 @@ details > summary::-webkit-details-marker {
   font-family: inherit;
   z-index: 0;
 }
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fade-in-up 0.3s ease-out forwards;
+}
 ````
 
 ### `app/layout.tsx`
@@ -669,7 +1549,8 @@ details > summary::-webkit-details-marker {
 import type { Metadata } from "next";
 import "./globals.css";
 import Header from "@/components/Header";
-import PageTransition from "@/components/PageTransition"; // <-- ИМПОРТ
+import PageTransition from "@/components/PageTransition";
+import { ToastProvider } from "@/components/Toast";
 
 export const metadata: Metadata = {
   title: "Намылимся. — Лента",
@@ -682,11 +1563,28 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ru" data-theme="light">
-      <body className="min-h-screen flex flex-col"> {/* Добавили flex для прижатия футера */}
+    <html lang="ru" data-theme="light" suppressHydrationWarning>
+      <head>
+        {/* Скрипт для мгновенного применения темы до рендера (чтобы не было вспышки) */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                const theme = localStorage.getItem('theme');
+                if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                  document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                  document.documentElement.setAttribute('data-theme', 'light');
+                }
+              } catch (e) {}
+            `,
+          }}
+        />
+      </head>
+      <body className="min-h-screen flex flex-col">
+        <ToastProvider>
         <Header />
         
-        {/* Оборачиваем в анимированный компонент */}
         <PageTransition>
           {children}
         </PageTransition>
@@ -695,6 +1593,7 @@ export default function RootLayout({
           <p>«Намылимся.» — площадка для живых встреч. Ответственность за проведение событий лежат на организаторах и участниках.</p>
           <p>16+ · Правила сообщества · Поддержка</p>
         </footer>
+        </ToastProvider>
       </body>
     </html>
   );
@@ -724,16 +1623,25 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 function LoginForm() {
+  const [showPassword, setShowPassword] = useState(false);
   const searchParams = useSearchParams();
   const isRegisterMode = searchParams.get('mode') === 'register';
   const [gender, setGender] = useState('none');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
+  const [cities, setCities] = useState<string[]>([]);
+  const [city, setCity] = useState('');
   const [isLogin, setIsLogin] = useState(!isRegisterMode); 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const router = useRouter();
+
+  useEffect(() => {
+    supabase.from('cities').select('name').order('name').then(({ data }) => {
+      if (data) setCities(data.map(c => c.name));
+    });
+  }, []);
 
   useEffect(() => {
     // Используем небольшую задержку, чтобы избежать синхронного обновления
@@ -765,6 +1673,7 @@ function LoginForm() {
             data: {
               username: username,
               gender: gender,
+              city: city,
             }
           }
         });
@@ -819,16 +1728,37 @@ function LoginForm() {
         {/* Поле никнейма только для регистрации */}
         {!isLogin && (
           <div className="flex flex-col gap-1.5">
-            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш никнейм (публичное имя)</label>
+            <label htmlFor="login-username" className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш никнейм (публичное имя)</label>
             <input 
+              id="login-username"
+              name="username"
               type="text" 
               value={username} 
-              onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Zа-яА-Я0-9_]/g, ''))} // Только буквы, цифры и _
+              onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Zа-яА-Я0-9_]/g, ''))}
               required
+              autoComplete="username"
+              minLength={3}
+              maxLength={32}
               placeholder="например: Вадим_Крутой"
-              className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+              aria-describedby="login-username-hint"
+              className="p-2.5 min-h-11 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
             />
-            <span className="text-[11px] text-brand-muted font-bold">Разрешены кириллица, латиница, цифры и _. Одинаковые запрещены.</span>
+            <span id="login-username-hint" className="text-[11px] text-brand-muted font-bold">Разрешены кириллица, латиница, цифры и _. Одинаковые запрещены.</span>
+          </div>
+        )}
+
+                {!isLogin && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш город</label>
+            <select 
+              value={city} 
+              onChange={(e) => setCity(e.target.value)} 
+              required
+              className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors"
+            >
+              <option value="" disabled>Выберите город</option>
+              {cities.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
           </div>
         )}
 
@@ -853,15 +1783,37 @@ function LoginForm() {
             className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
           />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[12px] font-extrabold uppercase text-brand-muted">Пароль</label>
-          <input 
-            type="password" 
-            value={password} 
-            onChange={(e) => setPassword(e.target.value)} 
-            required
-            className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
-          />
+
+         <div className="flex flex-col gap-1.5">
+          <div className="flex justify-between items-center">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Пароль</label>
+            {isLogin && (
+              <Link href="/forgot-password" className="text-[11px] font-bold text-brand-accent hover:underline">
+                Забыли пароль?
+              </Link>
+            )}
+          </div>
+          <div className="relative">
+            <input 
+              type={showPassword ? 'text' : 'password'}
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)} 
+              required
+              className="w-full p-2.5 pr-10 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-muted hover:text-brand-text transition-colors"
+              aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+            >
+              {showPassword ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              )}
+            </button>
+          </div>
         </div>
 
         <button 
@@ -934,6 +1886,24 @@ import { createClient } from '@/lib/supabase-server';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import ApplicationActions from '@/components/ApplicationActions';
+import { getUnreadCounts } from '@/app/actions';
+
+// Явно описываем типы для TypeScript
+type EventType = {
+  id: string;
+  title: string;
+  date_time: string;
+  organizer_name: string;
+  max_participants: number;
+};
+
+type ApplicationType = {
+  id: string;
+  status: string;
+  event_id: string;
+  user_id: string;
+  profile?: { username: string } | null;
+};
 
 export default async function MyEventsPage() {
   const supabase = await createClient();
@@ -941,29 +1911,42 @@ export default async function MyEventsPage() {
 
   if (!user) redirect('/login');
 
-  // 1. Получаем события пользователя (только нужные колонки)
+  // 1. Получаем события пользователя
   const { data: events } = await supabase
     .from('events')
     .select('id, title, date_time, organizer_name, max_participants')
     .eq('organizer_id', user.id)
-    .order('date_time', { ascending: true });
+    .order('date_time', { ascending: true }) as { data: EventType[] | null };
 
   const eventIds = events?.map(e => e.id) || [];
 
-  // 2. Получаем заявки вместе с профилями авторов (JOIN)
-  // Один запрос вместо трех!
-  const { data: applications } = await supabase
+  // 2. Получаем заявки (БЕЗ JOIN)
+  const { data: applications, error: appsError } = await supabase
     .from('applications')
-    .select(`
-      id, 
-      status, 
-      event_id, 
-      user_id,
-      profiles!applications_user_id_fkey ( username )
-    `)
-    .in('event_id', eventIds);
+    .select('id, status, event_id, user_id')
+    .in('event_id', eventIds) as { data: ApplicationType[] | null, error: any };
 
-  // 3. Получаем МОИ заявки с событиями (JOIN)
+  if (appsError) {
+    console.error("КРИТИЧЕСКАЯ ОШИБКА загрузки заявок:", appsError);
+  }
+
+  // 3. Получаем профили для этих заявок
+  let applicationsWithProfiles: ApplicationType[] = [];
+  if (applications && applications.length > 0) {
+    const userIds = [...new Set(applications.map(app => app.user_id))];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .in('id', userIds) as { data: { id: string, username: string }[] | null };
+
+    // Сшиваем заявки с профилями
+    applicationsWithProfiles = applications.map(app => ({
+      ...app,
+      profile: profiles?.find(p => p.id === app.user_id)
+    }));
+  }
+
+  // 4. Получаем МОИ заявки (для блока "Я участник")
   const { data: myApplications } = await supabase
     .from('applications')
     .select(`
@@ -973,15 +1956,22 @@ export default async function MyEventsPage() {
       events!fk_applications_event ( id, title, date_time, organizer_name )
     `)
     .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false }) as { data: any[] | null };
 
-  // Группируем заявки по event_id (O(N) вместо O(A × P))
-  const appsByEvent = (applications || []).reduce((acc, app) => {
+  // 5. Счетчики непрочитанных
+  const myAppEventIds = (myApplications || [])
+    .map(app => Array.isArray(app.events) ? app.events[0]?.id : app.events?.id)
+    .filter(Boolean) as string[];
+
+  const allEventIds = [...new Set([...eventIds, ...myAppEventIds])];
+  const unreadCounts = await getUnreadCounts(allEventIds);
+
+  // Группируем
+  const appsByEvent = applicationsWithProfiles.reduce((acc, app) => {
     if (!acc[app.event_id]) acc[app.event_id] = [];
     acc[app.event_id].push(app);
     return acc;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-}, {} as Record<string, any[]>);
+  }, {} as Record<string, ApplicationType[]>);
 
   return (
     <main className="max-w-[1200px] mx-auto px-4 md:px-6 py-10 min-h-screen">
@@ -1000,13 +1990,20 @@ export default async function MyEventsPage() {
             const eventApps = appsByEvent[event.id] || [];
             const pendingApps = eventApps.filter(app => app.status === 'pending');
             const approvedApps = eventApps.filter(app => app.status === 'approved');
+            const unread = unreadCounts[event.id] || 0;
 
             return (
-              <div key={event.id} className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5 md:p-6">
+              <div key={event.id} className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5 md:p-6 relative">
                 
+                {unread > 0 && (
+                  <div className="absolute top-5 right-5 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse shadow-md">
+                    В чате {unread} новых
+                  </div>
+                )}
+
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
                   <div>
-                    <h2 className="text-2xl font-extrabold mb-2">{event.title}</h2>
+                    <h2 className="text-2xl font-extrabold mb-2 pr-24">{event.title}</h2>
                     <p className="text-brand-muted font-bold text-sm">
                       {new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })} в {new Date(event.date_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                     </p>
@@ -1026,16 +2023,12 @@ export default async function MyEventsPage() {
                       <p className="text-sm text-brand-muted font-bold">Новых заявок нет.</p>
                     ) : (
                       <ul className="flex flex-col gap-3">
-                        {pendingApps.map((app) => {
-                          // Supabase возвращает связи как массив (даже для one-to-one)
-                          const profile = Array.isArray(app.profiles) ? app.profiles[0] : app.profiles;
-                          return (
-                            <li key={app.id} className="flex items-center justify-between bg-brand-bg p-2 rounded-brand border border-brand-line">
-                              <span className="font-bold text-sm truncate mr-2">@{profile?.username || 'Пользователь'}</span>
-                              <ApplicationActions applicationId={app.id} />
-                            </li>
-                          );
-                        })}
+                        {pendingApps.map((app) => (
+                          <li key={app.id} className="flex items-center justify-between bg-brand-bg p-2 rounded-brand border border-brand-line">
+                            <span className="font-bold text-sm truncate mr-2">@{app.profile?.username || 'Пользователь'}</span>
+                            <ApplicationActions applicationId={app.id} />
+                          </li>
+                        ))}
                       </ul>
                     )}
                   </div>
@@ -1046,14 +2039,11 @@ export default async function MyEventsPage() {
                       <p className="text-sm text-brand-muted font-bold">Пока никого нет.</p>
                     ) : (
                       <ul className="flex flex-col gap-2">
-                        {approvedApps.map((app) => {
-                          const profile = Array.isArray(app.profiles) ? app.profiles[0] : app.profiles;
-                          return (
-                            <li key={app.id} className="bg-brand-bg p-2 rounded-brand border border-brand-line text-sm font-bold truncate">
-                              @{profile?.username || 'Пользователь'}
-                            </li>
-                          );
-                        })}
+                        {approvedApps.map((app) => (
+                          <li key={app.id} className="bg-brand-bg p-2 rounded-brand border border-brand-line text-sm font-bold truncate">
+                            @{app.profile?.username || 'Пользователь'}
+                          </li>
+                        ))}
                       </ul>
                     )}
                   </div>
@@ -1078,7 +2068,9 @@ export default async function MyEventsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {myApplications.map((app) => {
               const event = Array.isArray(app.events) ? app.events[0] : app.events;
-              if (!event) return null; // Защита, если событие было удалено
+              if (!event) return null;
+
+              const unread = unreadCounts[event.id] || 0;
 
               let statusText = 'Ожидает подтверждения';
               let statusColor = 'text-brand-accent border-brand-accent bg-brand-accent/10';
@@ -1092,12 +2084,19 @@ export default async function MyEventsPage() {
               }
 
               return (
-                <div key={app.id} className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5 flex flex-col gap-4">
+                <div key={app.id} className="relative bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5 flex flex-col gap-4">
+                  
+                  {unread > 0 && (
+                    <div className="absolute top-4 right-4 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full animate-pulse">
+                      В чате {unread}
+                    </div>
+                  )}
+
                   <div>
                     <span className={`inline-block px-3 py-1 text-xs font-extrabold uppercase rounded border-2 mb-3 ${statusColor}`}>
                       {statusText}
                     </span>
-                    <h3 className="text-xl font-extrabold mb-1">{event.title}</h3>
+                    <h3 className="text-xl font-extrabold mb-1 pr-16">{event.title}</h3>
                     <p className="text-brand-muted font-bold text-sm">
                       {new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })} в {new Date(event.date_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                     </p>
@@ -1114,6 +2113,34 @@ export default async function MyEventsPage() {
             })}
           </div>
         )}
+      </div>
+    </main>
+  );
+}
+````
+
+### `app/not-found.tsx`
+
+``tsx
+import Link from 'next/link';
+
+export default function NotFound() {
+  return (
+    <main className="max-w-md mx-auto mt-20 px-6">
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8 text-center">
+        <h1 className="text-6xl font-extrabold text-brand-accent mb-2">404</h1>
+        <h2 className="text-xl font-extrabold uppercase mb-4">
+          Страница не найдена
+        </h2>
+        <p className="text-brand-muted font-bold mb-6">
+          Возможно, событие было удалено или ссылка неверна.
+        </p>
+        <Link
+          href="/"
+          className="inline-block bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors"
+        >
+          Вернуться в ленту
+        </Link>
       </div>
     </main>
   );
@@ -1185,6 +2212,289 @@ export default function Home({
 }
 ````
 
+### `app/reset-password/page.tsx`
+
+``tsx
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/components/Toast';
+
+export default function ResetPasswordPage() {
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+  const { showSuccess, showError } = useToast();
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password.length < 6) {
+      showError('Пароль должен быть не менее 6 символов');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+
+      showSuccess('Пароль успешно изменен! Перенаправляем...');
+      setTimeout(() => router.push('/'), 1500); // Ждем 1.5 сек, чтобы человек прочитал, и редиректим
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Ошибка смены пароля');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="max-w-md mx-auto mt-20 px-6">
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8">
+        <h1 className="text-2xl font-extrabold uppercase mb-6 text-center">
+          Новый пароль
+        </h1>
+
+        <form onSubmit={handleUpdate} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Придумайте новый пароль</label>
+            <div className="relative">
+              <input 
+                type={showPassword ? 'text' : 'password'}
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                required
+                minLength={6}
+                placeholder="••••••••"
+                className="w-full p-2.5 pr-10 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-muted hover:text-brand-text transition-colors"
+                aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+              >
+                {showPassword ? (
+                  // Иконка "глаз перечеркнут"
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                ) : (
+                  // Иконка "глаз"
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                )}
+              </button>
+            </div>
+            <span className="text-[11px] text-brand-muted font-bold">Минимум 6 символов</span>
+          </div>
+
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="mt-2 bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Сохранение...' : 'Сохранить пароль'}
+          </button>
+        </form>
+      </div>
+    </main>
+  );
+}
+````
+
+### `bundle-project.ps1`
+
+``powershell
+# tools/bundle-project.ps1  (ASCII-only, safe in any encoding)
+param(
+    [string]$OutputFile = "project-bundle.md",
+    [string]$Root = (Get-Location).Path
+)
+
+Set-Location $Root
+$Root = (Get-Location).Path
+
+$excludeDirs = @(
+    'node_modules', '.next', '.git', 'dist', 'build', 'coverage',
+    '.turbo', '.vercel', 'out', '.idea', '.vscode', '.cache'
+)
+
+$excludeFileGlobs = @(
+    'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+    'next-env.d.ts',
+    'tree.txt', 'tree-security.txt',
+    'project-bundle.md', 'security-bundle.md',
+    '*.log',
+    'public/**/*.png', 'public/**/*.jpg', 'public/**/*.jpeg',
+    'public/**/*.svg', 'public/**/*.gif', 'public/**/*.webp',
+    'public/**/*.ico',
+    '**/*.map'
+)
+
+$binaryExt = @('.png','.jpg','.jpeg','.gif','.webp','.ico','.pdf','.zip',
+               '.woff','.woff2','.ttf','.otf','.mp4','.mp3','.lock')
+
+# --- custom recursive walk that PRUNES excluded dirs (no descent) ---
+$allFiles = New-Object System.Collections.Generic.List[object]
+
+function Walk {
+    param([string]$Dir, [string]$RelPrefix)
+
+    Get-ChildItem -LiteralPath $Dir -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        $item = $_
+
+        # skip symlinks / junctions to avoid loops
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return }
+
+        $rel = if ($RelPrefix) { "$RelPrefix/$($item.Name)" } else { $item.Name }
+
+        if ($item.PSIsContainer) {
+            if ($excludeDirs -contains $item.Name) { return }   # prune
+            Walk -Dir $item.FullName -RelPrefix $rel
+        } else {
+            foreach ($glob in $excludeFileGlobs) {
+                if ($rel -like $glob) { return }
+            }
+            $allFiles.Add([pscustomobject]@{
+                Full = $item.FullName
+                Rel  = $rel
+                Ext  = $item.Extension.ToLower()
+            })
+        }
+    }
+}
+
+Walk -Dir $Root -RelPrefix ''
+
+$allFiles = $allFiles | Sort-Object Rel
+
+# --- build tree (ASCII) ---
+$treeLines = New-Object System.Collections.Generic.List[string]
+$treeLines.Add((Split-Path $Root -Leaf) + '/')
+
+$tree = @{}
+foreach ($f in $allFiles) {
+    $parts = $f.Rel -split '/'
+    $node = $tree
+    for ($i=0; $i -lt $parts.Count; $i++) {
+        $p = $parts[$i]
+        $isFile = ($i -eq $parts.Count - 1)
+        if ($isFile) { $node[$p] = $null }
+        else {
+            if (-not $node.ContainsKey($p)) { $node[$p] = @{} }
+            $node = $node[$p]
+        }
+    }
+}
+
+function Render-Tree {
+    param($Node, [string]$Prefix)
+    $keys = $Node.Keys | Sort-Object {
+        if ($Node[$_] -eq $null) { 1 } else { 0 }
+    }, { $_ }
+    for ($i=0; $i -lt $keys.Count; $i++) {
+        $k = $keys[$i]
+        $isLast = ($i -eq $keys.Count - 1)
+        $conn = if ($isLast) { '\-- ' } else { '|-- ' }
+        $suffix = if ($Node[$k] -eq $null) { '' } else { '/' }
+        $script:treeLines.Add("$Prefix$conn$k$suffix")
+        if ($Node[$k] -ne $null) {
+            $newPrefix = $Prefix + $(if ($isLast) { '    ' } else { '|   ' })
+            Render-Tree -Node $Node[$k] -Prefix $newPrefix
+        }
+    }
+}
+Render-Tree -Node $tree -Prefix ''
+
+function Get-Lang {
+    param([string]$Ext)
+    switch ($Ext) {
+        '.ts'   { 'ts' }   '.tsx' { 'tsx' }  '.js'  { 'js' }
+        '.jsx'  { 'jsx' }  '.mjs' { 'js' }   '.cjs' { 'js' }
+        '.json' { 'json' } '.css' { 'css' }  '.scss'{ 'scss' }
+        '.html' { 'html' } '.md'  { 'md' }
+        '.yml'  { 'yaml' } '.yaml'{ 'yaml' }
+        '.ps1'  { 'powershell' }
+        '.sql'  { 'sql' }
+        '.env'  { 'bash' }
+        default { '' }
+    }
+}
+
+# --- stream output directly to file (no StringBuilder) ---
+$outPath = Join-Path $Root $OutputFile
+$utf8 = New-Object System.Text.UTF8Encoding($false)  # no BOM
+$sw = New-Object System.IO.StreamWriter($outPath, $false, $utf8)
+
+try {
+    $sw.WriteLine("# Project bundle")
+    $sw.WriteLine()
+    $sw.WriteLine("Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
+    $sw.WriteLine("Root: $Root")
+    $sw.WriteLine()
+    $sw.WriteLine("## Tree")
+    $sw.WriteLine()
+    $sw.WriteLine('```')
+    foreach ($line in $treeLines) { $sw.WriteLine($line) }
+    $sw.WriteLine('```')
+    $sw.WriteLine()
+    $sw.WriteLine("## Files")
+    $sw.WriteLine()
+
+    foreach ($f in $allFiles) {
+        $rel = $f.Rel
+        $isEnv = (Split-Path $rel -Leaf) -like '.env*'
+
+        if ($binaryExt -contains $f.Ext) {
+            $sw.WriteLine("### ``$rel``")
+            $sw.WriteLine()
+            $sw.WriteLine("_binary file, content skipped_")
+            $sw.WriteLine()
+            continue
+        }
+
+        $content = $null
+        try {
+            $content = Get-Content -LiteralPath $f.Full -Raw -Encoding utf8 -ErrorAction Stop
+        } catch {
+            $sw.WriteLine("### ``$rel``")
+            $sw.WriteLine()
+            $sw.WriteLine("_read error: $($_.Exception.Message)_")
+            $sw.WriteLine()
+            continue
+        }
+        if ($null -eq $content) { $content = '' }
+
+        $lang = Get-Lang $f.Ext
+
+        if ($isEnv) {
+            $content = ($content -split "`r?`n" | ForEach-Object {
+                if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$') {
+                    "$($Matches[1])=***REDACTED***"
+                } else { $_ }
+            }) -join "`n"
+            $lang = 'bash'
+        }
+
+        $sw.WriteLine("### ``$rel``")
+        $sw.WriteLine()
+        $sw.WriteLine("````$lang")
+        $sw.WriteLine($content)
+        $sw.WriteLine('````')
+        $sw.WriteLine()
+    }
+}
+finally {
+    $sw.Flush()
+    $sw.Close()
+}
+
+$sizeKb = [math]::Round((Get-Item $outPath).Length / 1KB, 1)
+Write-Host "OK: $outPath"
+Write-Host "   Files: $($allFiles.Count)"
+Write-Host "   Size:  $sizeKb KB"
+````
+
 ### `components/ApplicationActions.tsx`
 
 ``tsx
@@ -1192,16 +2502,20 @@ export default function Home({
 
 import { useState } from 'react';
 import { approveApplication, rejectApplication } from '@/app/actions';
+import { useToast } from './Toast';
 
 export default function ApplicationActions({ applicationId }: { applicationId: string }) {
   const [isLoading, setIsLoading] = useState(false);
+  const { showSuccess, showError } = useToast();
 
-  const handleApprove = async () => {
+    const handleApprove = async () => {
     setIsLoading(true);
     try {
-      await approveApplication(applicationId);
-    } catch (error: any) {
-      alert(error.message);
+      const res = await approveApplication(applicationId);
+      if (res?.error) showError(res.error);
+      else showSuccess('Заявка подтверждена!');
+    } catch {
+      showError('Ошибка при подтверждении');
     } finally {
       setIsLoading(false);
     }
@@ -1209,32 +2523,36 @@ export default function ApplicationActions({ applicationId }: { applicationId: s
 
   const handleReject = async () => {
     if (!confirm('Вы уверены, что хотите отклонить эту заявку?')) return;
-    
     setIsLoading(true);
     try {
-      await rejectApplication(applicationId);
-    } catch (error: any) {
-      alert(error.message);
+      const res = await rejectApplication(applicationId);
+      if (res?.error) showError(res.error);
+      else showSuccess('Заявка отклонена');
+    } catch {
+      showError('Ошибка при отклонении');
     } finally {
       setIsLoading(false);
     }
   };
+
 
   return (
     <div className="flex gap-1.5 flex-shrink-0 ml-2">
       <button 
         onClick={handleApprove}
         disabled={isLoading}
-        className="w-8 h-8 flex items-center justify-center bg-green-100 text-green-700 border-2 border-green-600 rounded-brand hover:bg-green-600 hover:text-white transition-colors disabled:opacity-50"
-        title="Принять"
+        aria-label="Принять заявку"
+        aria-busy={isLoading}
+        className="w-11 h-11 flex items-center justify-center bg-green-100 text-green-700 border-2 border-green-600 rounded-brand hover:bg-green-600 hover:text-white transition-colors disabled:opacity-50"
       >
         {isLoading ? '...' : '✓'}
       </button>
       <button 
         onClick={handleReject}
         disabled={isLoading}
-        className="w-8 h-8 flex items-center justify-center bg-red-100 text-red-700 border-2 border-red-600 rounded-brand hover:bg-red-600 hover:text-white transition-colors disabled:opacity-50"
-        title="Отклонить"
+        aria-label="Отклонить заявку"
+        aria-busy={isLoading}
+        className="w-11 h-11 flex items-center justify-center bg-red-100 text-red-700 border-2 border-red-600 rounded-brand hover:bg-red-600 hover:text-white transition-colors disabled:opacity-50"
       >
         {isLoading ? '...' : '✕'}
       </button>
@@ -1342,6 +2660,190 @@ export default function AvatarPicker({ currentAvatar, gender, username, userId }
 }
 ````
 
+### `components/CancelModal.tsx`
+
+``tsx
+'use client';
+
+import { useState } from 'react';
+import { useToast } from './Toast';
+
+export type CancelRole = 'organizer' | 'participant';
+
+interface CancelModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: (reason: string) => void;
+  role: CancelRole;
+  eventTitle: string;
+  loading?: boolean;
+}
+
+export default function CancelModal({ isOpen, onClose, onConfirm, role, eventTitle, loading = false }: CancelModalProps) {
+  const [selectedReason, setSelectedReason] = useState('');
+  const [customReason, setCustomReason] = useState('');
+  const { showError } = useToast();
+
+  if (!isOpen) return null;
+
+  // Разные причины для орга и участника
+  const reasons = role === 'organizer' 
+    ? [
+        'Плохая погода или форс-мажор',
+        'Не набралось достаточно участников',
+        'Изменились планы организатора',
+        'Другое'
+      ]
+    : [
+        'Изменились планы / не могу прийти',
+        'Заболел / плохое самочувствие',
+        'Неудобно добираться до места',
+        'Другое'
+      ];
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const finalReason = selectedReason === 'Другое' ? customReason.trim() : selectedReason;
+    
+    if (!finalReason) {
+      showError('Пожалуйста, укажите причину отмены');
+      return;
+    }
+
+    onConfirm(finalReason);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      {/* Задний фон */}
+      <div className="absolute inset-0 bg-black/60" onClick={() => !loading && onClose()}></div>
+      
+      {/* Модалка */}
+      <div className="relative bg-brand-bg border-2 border-brand-line rounded-brand-lg p-6 max-w-md w-full">
+        <h2 className="text-xl font-extrabold uppercase mb-2 text-center text-red-600">
+          {role === 'organizer' ? 'Отмена события' : 'Отмена участия'}
+        </h2>
+        <p className="text-sm text-brand-muted font-bold text-center mb-6">
+          {role === 'organizer' 
+            ? `Вы уверены, что хотите отменить «${eventTitle}»?`
+            : `Вы уверены, что хотите снять свою заявку с «${eventTitle}»?`}
+        </p>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          
+          <div className="flex flex-col gap-2">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Укажите причину (обязательно)</label>
+            
+            {reasons.map((reason) => (
+              <label key={reason} className="flex items-center gap-2 cursor-pointer p-2 bg-brand-surface border-2 border-transparent hover:border-brand-line rounded-brand transition-colors">
+                <input 
+                  type="radio" 
+                  name="reason" 
+                  value={reason}
+                  checked={selectedReason === reason}
+                  onChange={(e) => setSelectedReason(e.target.value)}
+                  className="w-4 h-4 accent-brand-accent"
+                />
+                <span className="text-sm font-bold">{reason}</span>
+              </label>
+            ))}
+          </div>
+
+          {/* Поле для ввода своей причины */}
+          {selectedReason === 'Другое' && (
+            <div className="flex flex-col gap-1.5">
+              <textarea
+                value={customReason}
+                onChange={(e) => setCustomReason(e.target.value)}
+                placeholder="Напишите вашу причину..."
+                rows={3}
+                maxLength={300}
+                className="p-2.5 bg-brand-surface border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors resize-none"
+              />
+            </div>
+          )}
+
+          <div className="flex gap-3 mt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="flex-1 bg-brand-surface text-brand-text font-extrabold text-sm uppercase px-4 py-3 border-2 border-brand-line rounded-brand hover:bg-brand-bg transition-colors disabled:opacity-50"
+            >
+              Назад
+            </button>
+            <button
+              type="submit"
+              disabled={loading || !selectedReason}
+              className="flex-1 bg-red-600 text-white font-extrabold text-sm uppercase px-4 py-3 border-2 border-red-800 rounded-brand hover:bg-red-700 transition-colors disabled:opacity-50"
+            >
+              {loading ? 'Отправка...' : 'Подтвердить'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+````
+
+### `components/CancelParticipationButton.tsx`
+
+``tsx
+'use client';
+
+import { useState } from 'react';
+import { cancelApprovedApplication } from '@/app/actions';
+import { useRouter } from 'next/navigation';
+import { useToast } from './Toast';
+import CancelModal from './CancelModal';
+
+export default function CancelParticipationButton({ eventId, eventTitle }: { eventId: string, eventTitle: string }) {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { showSuccess, showError } = useToast();
+  const router = useRouter();
+
+  const handleConfirmCancel = async (reason: string) => {
+    setLoading(true);
+    try {
+      const res = await cancelApprovedApplication(eventId, reason);
+      if (res?.error) showError(res.error);
+      else {
+        showSuccess('Вы сняли заявку. Организатор уведомлен.');
+        setIsModalOpen(false);
+        router.refresh();
+      }
+    } catch (error) {
+      showError('Произошла ошибка');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <button 
+        onClick={() => setIsModalOpen(true)}
+        className="w-full mt-2 bg-brand-surface text-brand-muted font-extrabold text-sm uppercase px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-bg transition-colors"
+      >
+        Отменить участие
+      </button>
+
+      <CancelModal 
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onConfirm={handleConfirmCancel}
+        role="participant"
+        eventTitle={eventTitle}
+        loading={loading}
+      />
+    </>
+  );
+}
+````
+
 ### `components/CategoryIcon.tsx`
 
 ``tsx
@@ -1392,6 +2894,24 @@ export default function CategoryIcon({ category }: CategoryIconProps) {
       
     </div>
   );
+}
+````
+
+### `components/ClientMapWrapper.tsx`
+
+``tsx
+'use client';
+
+import dynamic from 'next/dynamic';
+
+// Здесь мы говорим Next.js: "не рендери карту на сервере"
+const Map = dynamic(() => import('./MapComponent'), { 
+  ssr: false,
+  loading: () => <div className="h-48 bg-brand-bg animate-pulse rounded border border-brand-line"></div>
+});
+
+export default function ClientMapWrapper(props: any) {
+  return <Map {...props} />;
 }
 ````
 
@@ -1475,6 +2995,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import MapPicker from './MapPicker';
 import { User } from '@supabase/supabase-js';
+import { useToast } from './Toast';
 
 export default function CreateEventForm() {
   const formRef = useRef<HTMLFormElement>(null);
@@ -1488,6 +3009,18 @@ export default function CreateEventForm() {
   const [location, setLocation] = useState('');
   
   const router = useRouter();
+  const { showSuccess, showError } = useToast();
+
+  const [city, setCity] = useState('');
+  
+  useEffect(() => {
+    if (user) {
+      supabase.from('profiles').select('city').eq('id', user.id).single().then(({ data }) => {
+        if (data?.city) setCity(data.city);
+      });
+    }
+  }, [user]);
+
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -1499,17 +3032,26 @@ export default function CreateEventForm() {
   async function handleSubmit(formData: FormData) {
     setIsPending(true);
     try {
-      await createEvent(formData);
+      const res = await createEvent(formData);
+      
+      // Если вернулась ошибка, показываем её и НЕ сбрасываем форму
+      if (res?.error) {
+        showError(res.error);
+        return; 
+      }
+
+      // Если ошибки нет (успех) — сбрасываем форму
       formRef.current?.reset();
-      setLocation(''); // Сбрасываем поле адреса после отправки
+      setLocation('');
       setLat(null);
       setLng(null);
-      alert('Событие успешно создано!');
+      
+      showSuccess('Событие успешно создано!');
       formRef.current?.closest('details')?.removeAttribute('open');
       router.refresh();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Ошибка при создании события';
-      alert(message);
+      // Если произошло что-то совсем непредвиденное
+      showError('Произошла непредвиденная ошибка');
     } finally {
       setIsPending(false);
     }
@@ -1531,7 +3073,15 @@ export default function CreateEventForm() {
   }
 
   return (
-    <form ref={formRef} action={handleSubmit} className="flex flex-col gap-5">
+      <form 
+      ref={formRef} 
+      onSubmit={(e) => {
+        e.preventDefault(); // Останавливаем стандартную отправку формы
+        const formData = new FormData(e.currentTarget);
+        handleSubmit(formData); // Вызываем наш экшен вручную
+      }} 
+      className="flex flex-col gap-5"
+    >
       
       <div className="flex flex-col gap-1.5">
         <label className="text-[12px] font-extrabold uppercase text-brand-muted">Название</label>
@@ -1575,6 +3125,19 @@ export default function CreateEventForm() {
       </div>
 
       <div className="flex flex-col gap-1.5">
+          <label className="text-[12px] font-extrabold uppercase text-brand-muted">Город события</label>
+          <input 
+            name="city" 
+            type="text" 
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            required
+            placeholder="Выберите город" 
+            className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+          />
+        </div>
+
+      <div className="flex flex-col gap-1.5">
         <label className="text-[12px] font-extrabold uppercase text-brand-muted">Место (кликните на карту)</label>
         <input 
           required 
@@ -1590,13 +3153,16 @@ export default function CreateEventForm() {
         <input type="hidden" name="lng" value={lng || ''} />
 
         <div className="mt-2">
-        <MapPicker 
-          onLocationSelect={(selectedLat: number, selectedLng: number, address: string) => {
-            setLat(selectedLat);
-            setLng(selectedLng);
-            setLocation(address);
-          }} 
-        />
+<MapPicker 
+  onLocationSelect={(selectedLat, selectedLng, address) => {
+    setLat(selectedLat);
+    setLng(selectedLng);
+    setLocation(address);
+  }} 
+  onCitySelect={(selectedCity) => {
+    setCity(selectedCity); // <--- Автоматически обновляем поле города!
+  }}
+/>
         </div>
       </div>
 
@@ -1617,6 +3183,61 @@ export default function CreateEventForm() {
 }
 ````
 
+### `components/EventAdminActions.tsx`
+
+``tsx
+'use client';
+
+import { useState } from 'react';
+import { cancelEvent } from '@/app/actions';
+import { useRouter } from 'next/navigation';
+import { useToast } from './Toast';
+import CancelModal from './CancelModal';
+
+export default function EventAdminActions({ eventId, eventTitle }: { eventId: string, eventTitle: string }) {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { showSuccess, showError } = useToast();
+  const router = useRouter();
+
+  const handleConfirmCancel = async (reason: string) => {
+    setLoading(true);
+    try {
+      const res = await cancelEvent(eventId, reason);
+      if (res?.error) showError(res.error);
+      else {
+        showSuccess('Событие отменено. Участники уведомлены.');
+        router.push('/my-events');
+      }
+    } catch (error) {
+      showError('Произошла ошибка');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <button 
+        onClick={() => setIsModalOpen(true)}
+        className="bg-red-100 text-red-700 font-extrabold text-sm uppercase px-4 py-2 border-2 border-red-300 rounded-brand hover:bg-red-200 transition-colors w-full"
+      >
+        Отменить событие
+      </button>
+
+      <CancelModal 
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onConfirm={handleConfirmCancel}
+        role="organizer"
+        eventTitle={eventTitle}
+        loading={loading}
+      />
+    </>
+  );
+}
+````
+
 ### `components/EventCard.tsx`
 
 ``tsx
@@ -1625,16 +3246,18 @@ export default function CreateEventForm() {
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
-import Map from './Map';
 import Image from 'next/image';
 import type { EventListItemDTO } from '@/lib/event-dto';
 import { applyToEvent, cancelApplication } from '@/app/actions';
 import type { User } from '@supabase/supabase-js';
+import ClientMapWrapper from './ClientMapWrapper';
+import { useToast } from './Toast';
 
 export default function EventCard({ item }: { item: EventListItemDTO }) {
   const {
     id,
     organizerId,
+    unreadCount,
     category,
     dateTime,
     title,
@@ -1652,59 +3275,62 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
     isOrganizer,
     organizerAvatar,
     organizerGender,
+    city,
   } = item;
 
-  // Локальный статус для мгновенного UI
+  const { showSuccess, showError } = useToast();
   const [myStatus, setMyStatus] = useState<
     'pending' | 'approved' | 'rejected' | null
   >(myApplicationStatus);
   const [loading, setLoading] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  
 
-
-  // Получаем пользователя на клиенте, чтобы кнопка сразу менялась
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);
     });
   }, []);
 
-  // Проверка: организатор ли это? Либо из серверного DTO, либо по клиентскому ID
   const isActuallyOrganizer = isOrganizer || (user !== null && user.id === organizerId);
-
   const hasExactCoords = typeof lat === 'number' && typeof lng === 'number';
+  const isPast = new Date(dateTime) < new Date(); 
 
   const handleApply = async () => {
     setLoading(true);
     try {
-      await applyToEvent(id);
-      setMyStatus('pending');
-       } catch (error) {
-      const message = error instanceof Error ? error.message : 'Произошла ошибка';
-      alert(message);
-      } finally {
-
+      const res = await applyToEvent(id);
+      if (res?.error) {
+        showError(res.error);
+      } else {
+        setMyStatus('pending');
+        showSuccess('Заявка отправлена! Ждите подтверждения.');
+      }
+    } catch {
+      showError('Произошла ошибка');
+    } finally {
       setLoading(false);
     }
   };
 
-  const handleCancel = async () => {
+    const handleCancel = async () => {
     if (!confirm('Вы уверены, что хотите отменить заявку?')) return;
     setIsCanceling(true);
     try {
-      await cancelApplication(id);
-      setMyStatus(null);
-   } catch (error) {
-      const message = error instanceof Error ? error.message : 'Произошла ошибка';
-      alert(message);
+      const res = await cancelApplication(id);
+      if (res?.error) {
+        showError(res.error);
+      } else {
+        setMyStatus(null);
+        showSuccess('Заявка отменена');
+      }
+    } catch {
+      showError('Произошла ошибка');
     } finally {
       setIsCanceling(false);
     }
   };
 
-  // Состояние кнопки
   let buttonText = 'Хочу участвовать';
   let buttonDisabled = isFull || loading;
   let buttonClass =
@@ -1740,30 +3366,27 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
   });
 
   return (
-    <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg flex flex-col sm:flex-row overflow-hidden hover:opacity-95 transition-opacity w-full">
-      {/* ЛЕВАЯ КОЛОНКА */}
-      <div className="bg-brand-bg/50 p-4 sm:w-[150px] flex-shrink-0 flex flex-row sm:flex-col items-left border-b-2 sm:border-b-0 sm:border-r-2 border-brand-line gap-4 sm:gap-0 justify-between">
-        <div className="flex-shrink-0 w-full flex justify-center sm:justify-start">
-          <span className="text-[10px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-1 rounded border border-brand-cat/30 text-center block leading-tight">
-            {category}
-          </span>
-        </div>
-
-        <div className="flex flex-row sm:flex-col items-baseline sm:items-start justify-start w-full gap-2 sm:gap-0 sm:my-auto">
+    <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg flex flex-col sm:flex-row overflow-hidden hover:opacity-95 transition-opacity w-full relative">
+      
+      {/* ЛЕВАЯ КОЛОНКА (Дата, Время, Места) */}
+      <div className="bg-brand-bg/50 p-3 sm:p-4 sm:w-[140px] flex-shrink-0 flex flex-row sm:flex-col items-center sm:items-start border-b-2 sm:border-b-0 sm:border-r-2 border-brand-line justify-between sm:justify-center">
+        
+        <div className="flex flex-row sm:flex-col items-center sm:items-start gap-2 sm:gap-0">
           <div className="flex items-baseline gap-1">
-            <span className="text-5xl font-extrabold leading-none text-brand-text">
+            <span className="text-3xl sm:text-5xl font-extrabold leading-none text-brand-text">
               {dayNumber}
             </span>
-            <span className="text-[16px] font-bold text-brand-muted">
+            <span className="text-[14px] sm:text-[16px] font-bold text-brand-muted uppercase">
               {monthName}
             </span>
           </div>
-          <span className="text-2xl font-extrabold text-brand-text sm:mt-1">
+          {/* Время сделано крупным, как дата */}
+          <span className="text-3xl sm:text-2xl font-extrabold text-brand-text sm:mt-1">
             {timeOnly}
           </span>
         </div>
 
-        <div className="flex items-center justify-center sm:justify-start gap-1 w-full text-[12px] font-extrabold text-brand-muted">
+        <div className="flex items-center gap-1 text-[11px] sm:text-[12px] font-extrabold text-brand-muted mt-1 sm:mt-4">
           👤
           <span>
             {approvedParticipantsCount} / {maxParticipants}
@@ -1772,110 +3395,141 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
       </div>
 
       {/* ПРАВАЯ КОЛОНКА */}
-      <div className="p-5 md:p-6 flex-grow flex flex-col min-w-0">
+      <div className="p-4 sm:p-5 md:p-6 flex-grow flex flex-col min-w-0">
+        
+        {/* Категория над заголовком */}
+        <div className="mb-2">
+          <span className="text-[9px] sm:text-[10px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-0.5 rounded border border-brand-cat/30 inline-block">
+            {category}
+          </span>
+        </div>
+
+        {/* Заголовок */}
         <Link
           href={`/event/${id}`}
-          className="block hover:text-brand-accent transition-colors"
+          className="block hover:text-brand-accent transition-colors pr-12"
         >
-          <h2 className="text-xl md:text-2xl font-extrabold leading-tight">
+          <h2 className="text-lg sm:text-xl md:text-2xl font-extrabold leading-tight">
             {title}
           </h2>
         </Link>
 
         {/* Публичная метка места */}
-        <div className="flex items-center gap-1.5 text-[13px] font-bold text-brand-muted mt-2 mb-3">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-            <circle cx="12" cy="10" r="3"></circle>
-          </svg>
-          <span className="truncate">{publicLocationLabel}</span>
+        <div className="flex flex-col gap-1 text-[12px] sm:text-[13px] font-bold text-brand-muted mt-2 mb-2">
+          <div className="flex items-center gap-1.5">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="flex-shrink-0"
+            >
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+              <circle cx="12" cy="10" r="3"></circle>
+            </svg>
+            {city && (
+              <span className=" text-brand-cat px-1.5 py-0.5 rounded text-[12px] uppercase font-bold">
+                {city}
+              </span>
+            )}
+          </div>
+          <span className="break-words leading-snug">{publicLocationLabel}</span>
         </div>
 
-        <p className="text-[14px] text-brand-text/80 mb-4 line-clamp-2 leading-relaxed">
+        <p className="text-[13px] sm:text-[14px] text-brand-text/80 mb-3 line-clamp-2 leading-relaxed">
           {description}
         </p>
 
-        <div className="flex items-center gap-2 text-sm mb-5 mt-auto">
-          <div
-            className={`w-8 h-8 rounded-full border border-brand-line flex items-center justify-center text-[10px] font-extrabold flex-shrink-0 overflow-hidden
-              ${
-                organizerGender === 'male'
-                  ? 'bg-blue-100 text-blue-800'
-                  : organizerGender === 'female'
-                  ? 'bg-pink-100 text-pink-800'
-                  : 'bg-gray-200 text-gray-700'
-              }
-            `}
-          >
-            {organizerAvatar ? (
-              <Image
-                src={organizerAvatar}
-                alt={organizerName}
-                width={24}
-                height={24}
-                className="w-5 h-5 object-contain"
-              />
-            ) : (
-              organizerName.charAt(0)
+        {/* Организатор и кнопки */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-auto pt-2">
+          
+          <div className="flex items-center gap-2 text-sm">
+            <div
+              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-brand-line flex items-center justify-center text-[10px] font-extrabold flex-shrink-0 overflow-hidden
+                ${
+                  organizerGender === 'male'
+                    ? 'bg-blue-100 text-blue-800'
+                    : organizerGender === 'female'
+                    ? 'bg-pink-100 text-pink-800'
+                    : 'bg-gray-200 text-gray-700'
+                }
+              `}
+            >
+              {organizerAvatar ? (
+                <Image
+                  src={organizerAvatar}
+                  alt={organizerName}
+                  width={24}
+                  height={24}
+                  className="w-4 h-4 sm:w-5 sm:h-5 object-contain"
+                />
+              ) : (
+                organizerName.charAt(0)
+              )}
+            </div>
+
+            <div className="flex flex-col min-w-0">
+              <Link
+                href={`/@${organizerName}`}
+                className="text-brand-text hover:text-brand-accent transition-colors font-bold truncate leading-tight text-[12px] sm:text-sm"
+              >
+                {organizerName}
+              </Link>
+              <span className="text-brand-accent font-extrabold text-[8px] sm:text-[10px] uppercase leading-tight mt-0.5">
+                {organizerRank}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+             {!isPast && (
+              <button
+                onClick={handleApply}
+                disabled={buttonDisabled}
+                className={`flex-1 sm:flex-none font-extrabold text-[11px] sm:text-[13px] uppercase px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-brand-line rounded-brand transition-colors ${buttonClass}`}
+              >
+                {buttonText}
+              </button>
+            )}
+
+            {/* Кнопка Чат с бейджем непрочитанных */}
+            {(myStatus || isActuallyOrganizer) && (
+              <Link
+                href={`/event/${id}`}
+                className="relative bg-brand-surface text-brand-text font-extrabold text-[11px] sm:text-[13px] uppercase px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-brand-line rounded-brand hover:bg-brand-cat-soft transition-colors flex items-center justify-center"
+              >
+                Чат
+                {unreadCount > 0 && (
+                  <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[9px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full border-2 border-brand-surface px-1">
+                    {unreadCount}
+                  </span>
+                )}
+              </Link>
+            )}
+
+            {myStatus === 'pending' && (
+              <button
+                onClick={handleCancel}
+                disabled={isCanceling}
+                className="bg-red-100 text-red-700 font-extrabold text-[11px] sm:text-[13px] uppercase px-2 sm:px-3 py-1.5 sm:py-2 border-2 border-red-300 rounded-brand hover:bg-red-200 transition-colors disabled:opacity-50"
+                title="Отменить заявку"
+              >
+                ✕
+              </button>
             )}
           </div>
-
-          <div className="flex flex-col min-w-0">
-            <Link
-              href={`/@${organizerName}`}
-              className="text-brand-text hover:text-brand-accent transition-colors font-bold truncate leading-tight"
-            >
-              {organizerName}
-            </Link>
-            <span className="text-brand-accent font-extrabold text-[10px] uppercase leading-tight mt-0.5">
-              {organizerRank}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2 mt-auto">
-          <button
-            onClick={handleApply}
-            disabled={buttonDisabled}
-            className={`flex-1 font-extrabold text-[13px] uppercase px-4 py-2 border-2 border-brand-line rounded-brand transition-colors ${buttonClass}`}
-          >
-            {buttonText}
-          </button>
-
-          {(myStatus || isActuallyOrganizer) && (
-            <Link
-              href={`/event/${id}`}
-              className="bg-brand-surface text-brand-text font-extrabold text-[13px] uppercase px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-cat-soft transition-colors flex items-center justify-center"
-            >
-              Чат
-            </Link>
-          )}
-
-          {myStatus === 'pending' && (
-            <button
-              onClick={handleCancel}
-              disabled={isCanceling}
-              className="bg-red-100 text-red-700 font-extrabold text-[13px] uppercase px-3 py-2 border-2 border-red-300 rounded-brand hover:bg-red-200 transition-colors disabled:opacity-50"
-              title="Отменить заявку"
-            >
-              ✕
-            </button>
-          )}
         </div>
 
         {/* Карта */}
         {hasExactCoords && (
           <details className="mt-4 border-t border-dashed border-brand-line/30 pt-3 group">
-            <summary className="list-none cursor-pointer text-brand-muted hover:text-brand-accent font-bold text-[12px] uppercase transition-colors flex items-center gap-1">
+                       <summary
+              className="list-none cursor-pointer text-brand-muted hover:text-brand-accent font-bold text-[11px] sm:text-[12px] uppercase transition-colors flex items-center gap-1 py-2"
+            >
               <svg
                 className="transition-transform duration-300 group-open:rotate-180"
                 width="12"
@@ -1894,7 +3548,7 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
             <div className="details-content">
               <div className="details-inner">
                 <div className="mt-3">
-                  <Map
+                  <ClientMapWrapper
                     lat={lat as number}
                     lng={lng as number}
                     title={title}
@@ -1906,9 +3560,8 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
           </details>
         )}
 
-        {/* Плашка «место скрыто» */}
         {locationIsHidden && !hasExactCoords && (
-          <div className="mt-3 p-2 bg-brand-heat/10 border border-brand-heat rounded-brand text-brand-text font-bold text-[11px]">
+          <div className="mt-3 p-2 bg-brand-heat/10 border border-brand-heat rounded-brand text-brand-text font-bold text-[10px] sm:text-[11px]">
             Точное место откроется после подтверждения заявки.
           </div>
         )}
@@ -1925,6 +3578,9 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
 
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import { markChatAsRead } from '@/app/actions';
+import Image from 'next/image';
+import { useToast } from './Toast';
 
 interface EventChatProps {
   eventId: string;
@@ -1936,24 +3592,41 @@ interface Message {
   content: string;
   user_id: string;
   created_at: string;
-  profiles?: { username: string }; // Подтягиваем никнейм
+  reply_to: string | null;
+  profiles?: { username: string; avatar_url: string | null; gender: string | null }; 
+  reply_profile?: { username: string };
+  reply_content?: string;
 }
+
+const MAX_MESSAGE_LENGTH = 1000;
 
 export default function EventChat({ eventId, currentUserId }: EventChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const {showError } = useToast();
+  
+  
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Кэш профилей (теперь храним и аватарку тоже)
+  const profilesCache = useRef<Record<string, { username: string; avatar_url: string | null; gender: string | null }>>({});
+  const lastSendTime = useRef<number>(0);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-   // 1. Загружаем историю сообщений
+  // 1. Загрузка истории + отметка о прочтении
   useEffect(() => {
     const fetchMessages = async () => {
-      // Грузим только сообщения
+      markChatAsRead(eventId);
+
       const { data: msgs, error } = await supabase
         .from('messages')
         .select('*')
         .eq('event_id', eventId)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: false })
+        .limit(50);
 
       if (error) {
         console.error("Ошибка загрузки сообщений:", error);
@@ -1962,20 +3635,44 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
       }
 
       if (msgs && msgs.length > 0) {
-        // Собираем уникальные ID авторов
-        const userIds = [...new Set(msgs.map(m => m.user_id))];
+        const sortedMsgs = msgs.reverse();
+        const userIds = [...new Set(sortedMsgs.map(m => m.user_id))];
         
-        // Грузим их профили
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, username')
-          .in('id', userIds);
+        const missingUserIds = userIds.filter(id => !profilesCache.current[id]);
+        
+        if (missingUserIds.length > 0) {
+          // Запрашиваем username, avatar_url и gender
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, username, avatar_url, gender')
+            .in('id', missingUserIds);
+            
+          profiles?.forEach(p => {
+            profilesCache.current[p.id] = { 
+              username: p.username, 
+              avatar_url: p.avatar_url,
+              gender: p.gender
+            };
+          });
+        }
 
-        // Объединяем данные
-        const msgsWithProfiles = msgs.map(msg => ({
-          ...msg,
-          profiles: profiles?.find(p => p.id === msg.user_id)
-        }));
+        const msgsWithProfiles = sortedMsgs.map(msg => {
+          let replyData = {};
+          if (msg.reply_to) {
+            const original = sortedMsgs.find(m => m.id === msg.reply_to);
+            if (original) {
+              replyData = {
+                reply_content: original.content,
+                reply_profile: profilesCache.current[original.user_id]
+              };
+            }
+          }
+          return {
+            ...msg,
+            profiles: profilesCache.current[msg.user_id],
+            ...replyData
+          };
+        });
 
         setMessages(msgsWithProfiles);
       } else {
@@ -1987,27 +3684,62 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
     fetchMessages();
   }, [eventId]);
 
-  // 2. Подписываемся на новые сообщения (Realtime)
+  // 2. Realtime подписка
   useEffect(() => {
     const channel = supabase
-      .channel('schema-db-changes')
+      .channel(`chat-${eventId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `event_id=eq.${eventId}` },
         async (payload) => {
-          // Получаем никнейм для нового сообщения
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('username')
-            .eq('id', payload.new.user_id)
-            .single();
+          const newUserId = payload.new.user_id;
+          
+          if (!profilesCache.current[newUserId]) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('username, avatar_url, gender')
+              .eq('id', newUserId)
+              .single();
+            if (profile) {
+              profilesCache.current[newUserId] = { 
+                username: profile.username,
+                avatar_url: profile.avatar_url,
+                gender: profile.gender
+              };
+            }
+          }
+
+          let replyData = {};
+          if (payload.new.reply_to) {
+            const { data: original } = await supabase
+              .from('messages')
+              .select('content, user_id')
+              .eq('id', payload.new.reply_to)
+              .single();
+            if (original) {
+              if (!profilesCache.current[original.user_id]) {
+                 const { data: origProfile } = await supabase.from('profiles').select('username').eq('id', original.user_id).single();
+                 if (origProfile) profilesCache.current[original.user_id] = { username: origProfile.username, avatar_url: null, gender: null };
+              }
+              replyData = {
+                reply_content: original.content,
+                reply_profile: profilesCache.current[original.user_id]
+              };
+            }
+          }
 
           const newMsg = {
             ...payload.new,
-            profiles: profile
+            profiles: profilesCache.current[newUserId],
+            ...replyData
           } as Message;
 
-          setMessages((prev) => [...prev, newMsg]);
+          setMessages((prev) => {
+            if (prev.some(m => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+          
+          markChatAsRead(eventId);
         }
       )
       .subscribe();
@@ -2017,25 +3749,63 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
     };
   }, [eventId]);
 
-  // Автоскролл вниз при новом сообщении
+
+  const isFirstLoad = useRef(true);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // При первой загрузке ничего не скроллим
+    if (isFirstLoad.current) {
+      isFirstLoad.current = false;
+      return;
+    }
+    
+    // Находим сам контейнер чата (у которого overflow-y-auto)
+    const chatContainer = messagesEndRef.current?.closest('.overflow-y-auto');
+    
+    // Скроллим только внутренний контейнер чата, НЕ трогая саму страницу
+    if (chatContainer) {
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
   }, [messages]);
+
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() || sending) return;
 
-    const content = newMessage;
-    setNewMessage(''); // Очищаем поле сразу
+    const now = Date.now();
+    if (now - lastSendTime.current < 2000) {
+      showError('Не так быстро! Подождите пару секунд.'); // <-- ЗАМЕНА
+      return;
+    }
+    
+    if (newMessage.length > MAX_MESSAGE_LENGTH) {
+      showError(`Сообщение слишком длинное (максимум ${MAX_MESSAGE_LENGTH} символов).`); // <-- ЗАМЕНА
+      return;
+    }
 
-    const { error } = await supabase
-      .from('messages')
-      .insert([{ event_id: eventId, user_id: currentUserId, content }]);
+    setSending(true);
+    const content = newMessage.trim();
+    const replyId = replyingTo?.id || null;
+    
+    setNewMessage('');
+    setReplyingTo(null);
 
-    if (error) {
-      alert('Ошибка отправки сообщения');
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .insert([{ event_id: eventId, user_id: currentUserId, content, reply_to: replyId }]);
+
+      if (error) throw error;
+      lastSendTime.current = Date.now();
+      // Мы не показываем тост об успехе для каждого сообщения, 
+      // чтобы не спамить (сообщение и так появляется в чате).
+    } catch (error) {
       console.error(error);
+      showError('Не удалось отправить сообщение.'); // <-- ЗАМЕНА
+      setNewMessage(content); 
+    } finally {
+      setSending(false);
     }
   };
 
@@ -2046,7 +3816,6 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
   return (
     <div className="flex flex-col bg-brand-surface border-2 border-brand-line rounded-[16px] overflow-hidden h-[450px]">
       
-      {/* Лента сообщений */}
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-brand-bg/50">
         {messages.length === 0 ? (
           <div className="my-auto text-center">
@@ -2057,37 +3826,83 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
           messages.map((msg) => {
             const isMine = msg.user_id === currentUserId;
             const authorName = msg.profiles?.username || 'Пользователь';
+            const avatarUrl = msg.profiles?.avatar_url;
             const avatarLetter = authorName.charAt(0).toUpperCase();
+            
+            // Цвет фона для заглушки (как в EventCard)
+            const gender = msg.profiles?.gender;
+            const bgClass = gender === 'male' ? 'bg-blue-100 text-blue-800' : 
+                            gender === 'female' ? 'bg-pink-100 text-pink-800' : 
+                            'bg-gray-200 text-gray-700';
 
             return (
-              <div key={msg.id} className={`flex gap-2 max-w-[85%] ${isMine ? 'self-end flex-row-reverse' : 'self-start'}`}>
+              <div key={msg.id} className={`group flex gap-2 max-w-[85%] ${isMine ? 'self-end flex-row-reverse' : 'self-start'}`}>
                 
-                {/* Аватарка */}
-                <div className="w-8 h-8 flex-shrink-0 rounded-full bg-brand-line/10 border border-brand-line/20 flex items-center justify-center text-xs font-extrabold text-brand-muted mt-auto mb-1">
-                  {avatarLetter}
+                {/* Аватарка (картинка или буква) */}
+                <div className={`w-8 h-8 flex-shrink-0 rounded-full border border-brand-line/20 flex items-center justify-center text-xs font-extrabold overflow-hidden mt-auto mb-1 ${!avatarUrl ? bgClass : 'bg-brand-bg'}`}>
+                  {avatarUrl ? (
+                    <Image 
+                      src={avatarUrl} 
+                      alt={authorName} 
+                      width={32} 
+                      height={32} 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    avatarLetter
+                  )}
                 </div>
 
-                {/* Блок с сообщением */}
                 <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
-                  {/* Никнейм (скрываем для своих, чтобы не загромождать) */}
                   {!isMine && (
                     <span className="text-[11px] font-bold text-brand-muted mb-1 ml-1">
                       @{authorName}
                     </span>
                   )}
 
-                  {/* Текст сообщения */}
-                  <div 
-                    className={`px-4 py-2 text-[14px] font-medium leading-relaxed border rounded-2xl ${
-                      isMine 
-                        ? 'bg-orange-100 text-brand-text border-orange-200 rounded-br-sm' // Свои: слабый оранжевый
-                        : 'bg-blue-50 text-brand-text border-blue-100 rounded-bl-sm'     // Чужие: слабый голубой
-                    }`}
-                  >
-                    {msg.content}
+                  <div className="relative flex items-center gap-2">
+                    {isMine && (
+                      <button 
+                        onClick={() => {
+                          setReplyingTo(msg);
+                          inputRef.current?.focus();
+                        }}
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-brand-muted hover:text-brand-accent p-1"
+                        title="Ответить"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
+                      </button>
+                    )}
+
+                                       <div 
+                      className={`px-4 py-2 text-[14px] font-medium leading-relaxed border rounded-2xl whitespace-pre-wrap break-all ${
+                        isMine 
+                          ? 'bg-brand-accent-soft text-brand-text border-brand-line rounded-br-sm' 
+                          : 'bg-brand-surface text-brand-text border-brand-line rounded-bl-sm'    
+                      }`}
+                    >
+                      {msg.reply_content && (
+                        <div className="mb-2 pl-2 border-l-2 border-brand-line/50 opacity-70 text-[12px] italic line-clamp-2">
+                          <span className="font-bold">@{msg.reply_profile?.username || 'Юзер'}:</span> {msg.reply_content}
+                        </div>
+                      )}
+                      {msg.content}
+                    </div>
+
+                    {!isMine && (
+                      <button 
+                        onClick={() => {
+                        setReplyingTo(msg);
+                        inputRef.current?.focus();
+                      }}
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-brand-muted hover:text-brand-accent p-1"
+                        title="Ответить"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
+                      </button>
+                    )}
                   </div>
                 </div>
-
               </div>
             );
           })
@@ -2095,21 +3910,39 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Поле ввода */}
+      {replyingTo && (
+        <div className="bg-brand-bg border-t-2 border-brand-line px-4 py-2 flex items-center justify-between text-sm">
+          <div className="truncate text-brand-muted">
+            Ответ <span className="font-bold">@{replyingTo.profiles?.username || 'Юзер'}</span>: {replyingTo.content}
+          </div>
+          <button onClick={() => {
+            setReplyingTo(null);
+            inputRef.current?.focus();
+          }} className="text-brand-accent font-bold ml-2">✕</button>
+        </div>
+      )}
+
       <form onSubmit={handleSendMessage} className="p-3 bg-brand-surface border-t-2 border-brand-line flex gap-2 items-end">
-        <input
-          type="text"
+        <textarea
+          ref={inputRef}
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
           placeholder="Написать сообщение..."
-          className="flex-1 p-3 bg-brand-bg border-2 border-brand-line rounded-full outline-none focus:border-brand-accent transition-colors text-sm"
+          maxLength={MAX_MESSAGE_LENGTH}
+          rows={1}
+          className="flex-1 p-3 bg-brand-bg border-2 border-brand-line rounded-2xl outline-none focus:border-brand-accent transition-colors text-sm resize-none max-h-32"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSendMessage(e);
+            }
+          }}
         />
         <button 
           type="submit" 
-          disabled={!newMessage.trim()}
+          disabled={!newMessage.trim() || sending}
           className="w-11 h-11 flex-shrink-0 flex items-center justify-center bg-brand-text text-brand-bg rounded-full hover:bg-brand-accent transition-colors disabled:opacity-50"
         >
-          {/* Иконка самолетика */}
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         </button>
       </form>
@@ -2198,32 +4031,50 @@ import { User } from '@supabase/supabase-js';
 import NotificationsBell from './NotificationsBell';
 
 // Вспомогательный компонент для пунктов навигации ПК
-function NavItem({ href, label, pathname }: { href: string, label: string, pathname: string }) {
+function NavItem({ href, label, pathname, badgeCount }: { href: string, label: string, pathname: string, badgeCount?: number }) {
   const isActive = pathname === href;
   return (
     <Link 
       href={href} 
-      className={`font-bold text-sm tracking-wider transition-all duration-200 flex items-center gap-1
+      className={`relative font-bold text-sm tracking-wider transition-all duration-200 flex items-center gap-1
         ${isActive ? 'text-brand-accent' : 'text-brand-text hover:text-brand-accent'}
       `}
     >
       <span className={`text-brand-accent transition-all duration-200 ${isActive ? 'opacity-100' : 'opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0'}`}>[</span>
       <span>{label}</span>
       <span className={`text-brand-accent transition-all duration-200 ${isActive ? 'opacity-100' : 'opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0'}`}>]</span>
+      
+      {badgeCount !== undefined && badgeCount > 0 && (
+        <span className="absolute -top-2 -right-3 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full border border-brand-bg">
+          {badgeCount}
+        </span>
+      )}
     </Link>
   );
 }
 
-
 export default function Header() {
+  const [theme, setTheme] = useState('light');
+  
+  // Читаем тему при загрузке
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    // Оборачиваем в setTimeout, чтобы ESLint не ругался на синхронный setState
+    const timer = setTimeout(() => {
+      setTheme(savedTheme);
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
   const [user, setUser] = useState<User | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [unreadChats, setUnreadChats] = useState(0);
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    // Закрываем меню при смене страницы (с задержкой, чтобы избежать синхронного setState)
     const timer = setTimeout(() => {
       setIsMobileMenuOpen(false);
     }, 0);
@@ -2258,6 +4109,54 @@ export default function Header() {
     }
   }, [user]);
 
+  // Логика подсчета непрочитанных сообщений
+  useEffect(() => {
+    if (!user) {
+      const timer = setTimeout(() => setUnreadChats(0), 0);
+      return () => clearTimeout(timer);
+    }
+
+    const fetchUnreadCount = async () => {
+      const { data: reads } = await supabase
+        .from('chat_reads')
+        .select('event_id, last_read_at')
+        .eq('user_id', user.id);
+
+      const readMap = new Map(reads?.map(r => [r.event_id, r.last_read_at]) || []);
+
+      const { data: messages } = await supabase
+        .from('messages')
+        .select('id, event_id, created_at')
+        .neq('user_id', user.id)
+        .gt('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+
+      if (!messages) return;
+
+      let count = 0;
+      for (const msg of messages) {
+        const lastRead = readMap.get(msg.event_id);
+        if (!lastRead || new Date(msg.created_at) > new Date(lastRead)) {
+          count++;
+        }
+      }
+
+      setUnreadChats(count);
+    };
+
+    fetchUnreadCount();
+
+    const channel = supabase.channel('header-unread-chats')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+         fetchUnreadCount();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_reads' }, () => {
+         fetchUnreadCount();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user, pathname]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push('/');
@@ -2265,7 +4164,12 @@ export default function Header() {
     setIsMobileMenuOpen(false);
   };
 
-
+  const toggleTheme = () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+    localStorage.setItem('theme', newTheme);
+    document.documentElement.setAttribute('data-theme', newTheme);
+  };
 
   return (
     <>
@@ -2281,7 +4185,7 @@ export default function Header() {
               <NavItem href="/" label="Лента" pathname={pathname} />
             </div>
             <div className="group flex items-center">
-              <NavItem href="/my-events" label="Мои события" pathname={pathname} />
+              <NavItem href="/my-events" label="Мои события" pathname={pathname} badgeCount={unreadChats} />
             </div>
             <div className="group flex items-center">
               <NavItem href="/archive" label="Архив" pathname={pathname} />
@@ -2289,9 +4193,14 @@ export default function Header() {
           </nav>
 
           <div className="flex items-center gap-2 md:gap-3 z-50">
-            <button className="w-10 h-10 hidden md:flex items-center justify-center border-2 border-brand-line rounded-brand bg-brand-surface">🌙</button>
+            <button 
+              onClick={toggleTheme}
+              aria-label={theme === 'light' ? 'Включить тёмную тему' : 'Включить светлую тему'}
+              className="w-11 h-11 hidden md:flex items-center justify-center border-2 border-brand-line rounded-brand bg-brand-surface hover:bg-brand-bg transition-colors"
+            >
+              {theme === 'light' ? '🌙' : '☀️'}
+            </button>
             
-            {/* Кнопки для ПК */}
             <div className="hidden md:flex items-center gap-3">
               {user ? (
                 <>
@@ -2315,18 +4224,19 @@ export default function Header() {
               )}
             </div>
 
-            {/* Колокольчик для мобилок */}
             {user && (
               <div className="md:hidden">
                 <NotificationsBell />
               </div>
             )}
 
-            {/* Кнопка Гамбургер для мобилок */}
+            {/* Кнопка бургер (возвращены полоски) */}
             <button 
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="md:hidden w-10 h-10 flex flex-col items-center justify-center gap-1.5 border-2 border-brand-line rounded-brand bg-brand-surface"
-              aria-label="Меню"
+              className="md:hidden w-11 h-11 flex flex-col items-center justify-center gap-1.5 border-2 border-brand-line rounded-brand bg-brand-surface"
+              aria-label={isMobileMenuOpen ? 'Закрыть меню' : 'Открыть меню'}
+              aria-expanded={isMobileMenuOpen}
+              aria-controls="mobile-menu"
             >
               <span className={`block w-5 h-0.5 bg-brand-text transition-transform ${isMobileMenuOpen ? 'rotate-45 translate-y-2' : ''}`}></span>
               <span className={`block w-5 h-0.5 bg-brand-text transition-opacity ${isMobileMenuOpen ? 'opacity-0' : ''}`}></span>
@@ -2338,11 +4248,12 @@ export default function Header() {
 
       {/* Мобильное меню (Шторка) */}
       <div 
+        id="mobile-menu"
+        aria-hidden={!isMobileMenuOpen}
         className={`fixed inset-0 bg-brand-bg z-40 flex flex-col pt-24 px-6 transition-transform duration-300 ease-in-out md:hidden ${
           isMobileMenuOpen ? 'translate-y-0' : '-translate-y-full'
         }`}
       >
-        {/* Ключ key нужен, чтобы анимация перезапускалась при каждом открытии */}
         {isMobileMenuOpen && (
           <nav className="flex flex-col gap-2 text-2xl font-extrabold">
             <Link href="/" className={`animate-menu-item delay-1 border-b-2 border-brand-line py-4 flex items-center gap-2 ${pathname === '/' ? 'text-brand-accent' : ''}`}>
@@ -2354,6 +4265,7 @@ export default function Header() {
             <Link href="/my-events" className={`animate-menu-item delay-2 border-b-2 border-brand-line py-4 flex items-center gap-2 ${pathname === '/my-events' ? 'text-brand-accent' : ''}`}>
               {pathname === '/my-events' && <span className="text-brand-accent">[</span>}
               Мои события
+              {unreadChats > 0 && <span className="bg-red-500 text-white text-sm px-2 rounded-full">{unreadChats}</span>}
               {pathname === '/my-events' && <span className="text-brand-accent">]</span>}
             </Link>
             
@@ -2366,6 +4278,15 @@ export default function Header() {
         )}
 
         <div className="mt-auto mb-10 flex flex-col gap-4">
+          
+          {/* Кнопка смены темы для мобилок */}
+          <button 
+            onClick={toggleTheme}
+            className="animate-menu-item delay-3 bg-brand-surface text-brand-text font-extrabold text-lg p-3 border-2 border-brand-line rounded-brand flex items-center justify-center gap-2"
+          >
+            {theme === 'light' ? '🌚 Темная тема' : '🌞 Светлая тема'}
+          </button>
+
           {user ? (
             <>
               <Link href={`/@${username}`} className="animate-menu-item delay-4 text-xl font-bold text-center border-2 border-brand-line p-3 rounded-brand">
@@ -2511,11 +4432,13 @@ const icon = L.icon({
   iconAnchor: [12, 41],
 });
 
+// Добавляем onCitySelect в пропсы (сделаем его необязательным, чтобы карта не ломалась, если его не передали)
 interface MapPickerProps {
   onLocationSelect: (lat: number, lng: number, address: string) => void;
+  onCitySelect?: (city: string) => void;
 }
 
-function LocationMarker({ onLocationSelect }: MapPickerProps) {
+function LocationMarker({ onLocationSelect, onCitySelect }: MapPickerProps) {
   const [position, setPosition] = useState<L.LatLng | null>(null);
 
   useMapEvents({
@@ -2526,9 +4449,38 @@ function LocationMarker({ onLocationSelect }: MapPickerProps) {
       try {
         const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=ru`);
         const data = await response.json();
-        const address = data.display_name || `Широта: ${lat.toFixed(5)}, Долгота: ${lng.toFixed(5)}`;
         
-        onLocationSelect(lat, lng, address);
+        let shortAddress = data.display_name || `Широта: ${lat.toFixed(5)}, Долгота: ${lng.toFixed(5)}`;
+        
+    // ОБРЕЗАЕМ АДРЕС
+        if (data.address) {
+          const state = data.address.state || data.address.region || ''; // Область/регион
+          const city = data.address.city || data.address.town || data.address.village || '';
+          const road = data.address.road || data.address.pedestrian || data.address.footway || '';
+          const house = data.address.house_number ? `, ${data.address.house_number}` : '';
+          
+          // Формируем красивый короткий адрес
+          if (road) {
+            // Если есть улица, пишем: [Область (если это не город-миллионник), Город, Улица, Дом]
+            // Но чтобы не было "Московская область, Москва" (что странно), область добавляем только если город !== область
+            const statePrefix = (state && city && state !== city) ? state + ', ' : (state && !city ? state + ', ' : '');
+            shortAddress = `${statePrefix}${city ? city + ', ' : ''}${road}${house}`;
+          } else if (city) {
+            // Если улицы нет (например, кликнули в лес), пишем: [Область, Город/Населенный пункт]
+            const statePrefix = (state && state !== city) ? state + ', ' : '';
+            shortAddress = `${statePrefix}${city}`;
+          } else if (state) {
+            // Если вообще ничего нет, кроме области
+            shortAddress = state;
+          }
+          
+          // Автоматически подставляем город (или населенный пункт) в форму
+          if (city && onCitySelect) {
+            onCitySelect(city);
+          }
+        }
+        
+        onLocationSelect(lat, lng, shortAddress);
       } catch (error) {
         console.error("Ошибка геокодинга:", error);
         onLocationSelect(lat, lng, `Широта: ${lat.toFixed(5)}, Долгота: ${lng.toFixed(5)}`);
@@ -2549,7 +4501,7 @@ function ChangeView({ center }: { center: [number, number] }) {
   return null;
 }
 
-export default function MapPickerComponent({ onLocationSelect }: MapPickerProps) {
+export default function MapPickerComponent({ onLocationSelect, onCitySelect }: MapPickerProps) {
   const [center, setCenter] = useState<[number, number]>([55.751244, 37.618423]); // Москва по умолчанию
   const [isLocating, setIsLocating] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
@@ -2581,15 +4533,17 @@ export default function MapPickerComponent({ onLocationSelect }: MapPickerProps)
     );
   };
 
-  // Запрашиваем при первой загрузке
   useEffect(() => {
-    requestGeolocation();
+    // Оборачиваем в setTimeout, чтобы ESLint не ругался на синхронный вызов setState
+    const timer = setTimeout(() => {
+      requestGeolocation();
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   return (
     <div className="relative flex flex-col gap-2">
       
-      {/* Панель управления над картой */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button 
           type="button"
@@ -2602,7 +4556,6 @@ export default function MapPickerComponent({ onLocationSelect }: MapPickerProps)
         </button>
       </div>
 
-      {/* Сообщение об ошибке */}
       {geoError && (
         <div className="bg-brand-heat/10 border-2 border-brand-heat p-2 rounded-brand text-[11px] font-bold text-brand-text">
           {geoError}
@@ -2621,7 +4574,7 @@ export default function MapPickerComponent({ onLocationSelect }: MapPickerProps)
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <ChangeView center={center} />
-          <LocationMarker onLocationSelect={onLocationSelect} />
+          <LocationMarker onLocationSelect={onLocationSelect} onCitySelect={onCitySelect} />
         </MapContainer>
       </div>
     </div>
@@ -2781,12 +4734,19 @@ export default function NotificationsBell() {
 
   return (
     <div className="relative" ref={dropdownRef}>
-      <button
+       <button
         onClick={() => {
           setIsOpen(!isOpen);
           if (!isOpen) markAsRead();
         }}
-        className="relative w-10 h-10 flex items-center justify-center border-2 border-brand-line rounded-brand bg-brand-surface hover:bg-brand-bg transition-colors"
+        aria-label={
+          unreadCount > 0
+            ? `Уведомления, непрочитанных: ${unreadCount}`
+            : 'Уведомления'
+        }
+        aria-expanded={isOpen}
+        aria-haspopup="true"
+        className="relative w-11 h-11 flex items-center justify-center rounded-brand hover:bg-brand-bg transition-colors"
       >
         🔔
         {unreadCount > 0 && (
@@ -2797,7 +4757,11 @@ export default function NotificationsBell() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-72 md:w-80 bg-brand-surface border-2 border-brand-line rounded-brand shadow-lg z-50 max-h-96 overflow-y-auto">
+         <div
+          role="dialog"
+          aria-label="Уведомления"
+          className="absolute right-0 mt-2 w-72 md:w-80 bg-brand-surface border-2 border-brand-line rounded-brand shadow-lg z-50 max-h-96 overflow-y-auto"
+        >
           <div className="p-3 border-b-2 border-brand-line font-extrabold uppercase bg-brand-bg sticky top-0">
             Уведомления
           </div>
@@ -2867,6 +4831,128 @@ export default function PageTransition({ children }: { children: React.ReactNode
 }
 ````
 
+### `components/ReviewForm.tsx`
+
+``tsx
+'use client';
+
+import { useState } from 'react';
+import { leaveReview } from '@/app/actions';
+import { useRouter } from 'next/navigation';
+import { useToast } from './Toast';
+
+export default function ReviewForm({ eventId }: { eventId: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [rating, setRating] = useState(5);
+  const [hoveredRating, setHoveredRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+
+   const { showSuccess, showError } = useToast();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await leaveReview(eventId, rating, comment);
+      if (res?.error) {
+        showError(res.error);
+      } else {
+        showSuccess('Спасибо за ваш отзыв!');
+        setIsOpen(false);
+        router.refresh();
+      }
+    } catch (error) {
+      showError('Ошибка отправки');
+        console.error(error); // Чтобы ESLint не ругался на неиспользуемый error
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <button 
+        onClick={() => setIsOpen(true)}
+        className="bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors w-full"
+      >
+        Оставить отзыв о событии
+      </button>
+
+      {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          {/* Задний фон */}
+          <div className="absolute inset-0 bg-black/60" onClick={() => !loading && setIsOpen(false)}></div>
+          
+          {/* Модалка */}
+          <div className="relative bg-brand-bg border-2 border-brand-line rounded-brand-lg p-6 max-w-md w-full">
+            <h2 className="text-xl font-extrabold uppercase mb-4 text-center">Ваш отзыв</h2>
+            
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              
+              {/* Звезды */}
+              <div className="flex justify-center gap-2">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    type="button"
+                    onMouseEnter={() => setHoveredRating(star)}
+                    onMouseLeave={() => setHoveredRating(0)}
+                    onClick={() => setRating(star)}
+                    className="text-4xl transition-transform hover:scale-110 focus:outline-none"
+                  >
+                    <span className={(hoveredRating || rating) >= star ? 'text-yellow-500' : 'text-gray-300'}>★</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Комментарий */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[12px] font-extrabold uppercase text-brand-muted">Комментарий (необязательно)</label>
+                <textarea
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="Как все прошло?"
+                  rows={4}
+                  maxLength={500}
+                  className="p-2.5 bg-brand-surface border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors resize-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-2 bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Отправка...' : 'Отправить отзыв'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+````
+
+### `components/ScrollToTop.tsx`
+
+``tsx
+'use client';
+
+import { useEffect } from 'react';
+
+export default function ScrollToTop() {
+  useEffect(() => {
+    // Принудительно скроллим страницу в самый верх при монтировании компонента
+    window.scrollTo(0, 0);
+  }, []);
+
+  return null; // Компонент ничего не рендерит
+}
+````
+
 ### `components/Sidebar.tsx`
 
 ``tsx
@@ -2903,6 +4989,67 @@ export default function Sidebar() {
       </div>
     </aside>
   );
+}
+````
+
+### `components/Toast.tsx`
+
+``tsx
+'use client';
+
+import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+
+type ToastType = 'success' | 'error';
+type Toast = { id: number; message: string; type: ToastType };
+
+const ToastContext = createContext<{
+  showSuccess: (msg: string) => void;
+  showError: (msg: string) => void;
+} | null>(null);
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = useCallback((message: string, type: ToastType) => {
+    const id = Date.now();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    
+    // Удаляем через 4 секунды
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
+
+  const showSuccess = useCallback((msg: string) => addToast(msg, 'success'), [addToast]);
+  const showError = useCallback((msg: string) => addToast(msg, 'error'), [addToast]);
+
+  return (
+    <ToastContext.Provider value={{ showSuccess, showError }}>
+      {children}
+      
+      {/* Контейнер для тостов (фиксируется в правом нижнем углу) */}
+      <div className="fixed bottom-4 right-4 z-[200] flex flex-col gap-2 pointer-events-none">
+        {toasts.map((t) => (
+          <div 
+            key={t.id}
+            className={`pointer-events-auto px-4 py-3 rounded-brand border-2 shadow-lg font-bold text-sm max-w-sm animate-fade-in-up
+              ${t.type === 'success' 
+                ? 'bg-green-100 text-green-800 border-green-800' 
+                : 'bg-red-100 text-red-800 border-red-800'}
+            `}
+          >
+            {t.message}
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+export function useToast() {
+  const context = useContext(ToastContext);
+  if (!context) throw new Error('useToast must be used within ToastProvider');
+  return context;
 }
 ````
 
@@ -2999,7 +5146,8 @@ export type EventListItemDTO = {
   isFull: boolean;
   // публичное представление места — всегда безопасно
   publicLocationLabel: string;      // "Парк Горького" или "Место скрыто организатором"
-  locationIsHidden: boolean;        // факт скрытия, не сами данные
+  locationIsHidden: boolean;       // факт скрытия, не сами данные
+  city?: string | null;
   // точные данные — только если пользователь имеет право
   exactLocation?: string;           // undefined, если нет доступа
   lat?: number;                     // undefined, если нет доступа
@@ -3008,6 +5156,8 @@ export type EventListItemDTO = {
   isOrganizer: boolean;
   organizerAvatar?: string | null;
   organizerGender?: string | null;
+  /** Количество непрочитанных сообщений в чате этого события */
+  unreadCount: number;
 };
 ````
 
@@ -3016,15 +5166,12 @@ export type EventListItemDTO = {
 ``ts
 // lib/event-queries.ts
 import type { SupabaseClient } from '@supabase/supabase-js';
-import {
-  type EventRowForAccess,
-  type ViewerContext,
-  canSeeExactLocation,
-} from './event-access';
 import type { ApplicationStatus, EventListItemDTO } from './event-dto';
+import { type ViewerContext, canSeeExactLocation } from './event-access';
 
-type EventRow = EventRowForAccess & {
+type EventRow = {
   id: string;
+  organizer_id: string;
   category: string;
   date_time: string;
   title: string;
@@ -3035,25 +5182,22 @@ type EventRow = EventRowForAccess & {
   location: string;
   lat: number | null;
   lng: number | null;
+  hide_location: boolean;
   is_full: boolean;
-  profiles?:
-    | { avatar_url: string | null; gender: string | null }
-    | { avatar_url: string | null; gender: string | null }[]
-    | null;
+  city: string | null; // <--- 1. ДОБАВЛЕНО В ТИП
+  profiles?: { avatar_url: string | null; gender: string | null } | { avatar_url: string | null; gender: string | null }[] | null;
 };
 
-/**
- * Возвращает безопасный список событий для конкретного зрителя.
- * Добавлена пагинация (limit/offset) и возврат общего количества (total).
- */
 export async function getEventListDTOs(
   supabase: SupabaseClient,
   viewer: ViewerContext,
   limit: number = 10,
-  offset: number = 0
+  offset: number = 0,
+  isArchive: boolean = false
 ): Promise<{ items: EventListItemDTO[]; total: number }> {
-  // 1. Запрос с пагинацией и подсчетом общего количества
-  const { data, error, count } = await supabase
+  
+  // 1. Запрос с пагинацией и правильной фильтрацией
+  let query = supabase
     .from('events')
     .select(
       `
@@ -3071,46 +5215,53 @@ export async function getEventListDTOs(
       lng,
       hide_location,
       is_full,
+      city, 
       profiles!events_organizer_profile_fkey ( avatar_url, gender )
     `,
       { count: 'exact' }
-    )
-    .order('date_time', { ascending: true })
+    );
+
+  // Логика фильтрации по времени (архив или будущие)
+  if (isArchive) {
+    query = query.lt('date_time', new Date().toISOString());
+  } else {
+    query = query.gte('date_time', new Date().toISOString());
+  }
+
+  const { data, error, count } = await query
+    .order('date_time', { ascending: !isArchive })
     .range(offset, offset + limit - 1);
 
   if (error) throw error;
-  const events = (data ?? []) as unknown as EventRow[];
   
-  // Если событий нет, сразу возвращаем пустой массив
+  const events = (data ?? []) as unknown as EventRow[];
   if (events.length === 0) {
     return { items: [], total: count || 0 };
   }
 
   const ids = events.map((e) => e.id);
 
-  // 2. Агрегат approved по всем событиям — один запрос.
+  // 2. Агрегат approved
   const approvedCount = new Map<string, number>();
   {
-    const { data: approvedRows, error: approvedErr } = await supabase
+    const { data: approvedRows } = await supabase
       .from('applications')
       .select('event_id')
       .in('event_id', ids)
       .eq('status', 'approved');
-    if (approvedErr) throw approvedErr;
     for (const r of approvedRows ?? []) {
       approvedCount.set(r.event_id, (approvedCount.get(r.event_id) ?? 0) + 1);
     }
   }
 
-  // 3. Мои заявки по этим событиям — один запрос, только если авторизован.
+  // 3. Мои заявки
   const myStatus = new Map<string, ApplicationStatus>();
   if (viewer.kind === 'user') {
-    const { data: myApps, error: myErr } = await supabase
+    const { data: myApps } = await supabase
       .from('applications')
       .select('event_id, status')
       .in('event_id', ids)
       .eq('user_id', viewer.userId);
-    if (myErr) throw myErr;
     for (const a of myApps ?? []) {
       if (a.status === 'pending' || a.status === 'approved' || a.status === 'rejected') {
         myStatus.set(a.event_id, a.status);
@@ -3118,13 +5269,42 @@ export async function getEventListDTOs(
     }
   }
 
-  // 4. Сборка DTO
+  // 4. Считаем непрочитанные
+  const unreadCounts = new Map<string, number>();
+  if (viewer.kind === 'user') {
+    const { data: reads } = await supabase
+      .from('chat_reads')
+      .select('event_id, last_read_at')
+      .in('event_id', ids)
+      .eq('user_id', viewer.userId);
+
+    const readMap = new Map(reads?.map(r => [r.event_id, r.last_read_at]) || []);
+
+    for (const eventId of ids) {
+      const lastRead = readMap.get(eventId);
+      let msgQuery = supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('event_id', eventId)
+        .neq('user_id', viewer.userId);
+
+      if (lastRead) {
+        msgQuery = msgQuery.gt('created_at', lastRead);
+      }
+      
+      const { count: msgCount } = await msgQuery;
+      if (msgCount && msgCount > 0) {
+        unreadCounts.set(eventId, msgCount);
+      }
+    }
+  }
+
+  // 5. Сборка DTO
   const items = events.map((e): EventListItemDTO => {
     const myApp = myStatus.get(e.id) ?? null;
     const allowed = canSeeExactLocation(e, viewer, myApp);
     const approved = approvedCount.get(e.id) ?? 0;
     const isFull = Boolean(e.is_full) || approved >= e.max_participants;
-
     const profile = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles;
 
     const dto: EventListItemDTO = {
@@ -3143,10 +5323,12 @@ export async function getEventListDTOs(
         ? 'Место скрыто организатором'
         : e.location,
       locationIsHidden: e.hide_location,
+      city: e.city, // <--- 3. ДОБАВЛЕНО В DTO
       myApplicationStatus: myApp,
       isOrganizer: viewer.kind === 'user' && viewer.userId === e.organizer_id,
       organizerAvatar: profile?.avatar_url ?? null,
       organizerGender: profile?.gender ?? null,
+      unreadCount: unreadCounts.get(e.id) ?? 0,
     };
 
     if (allowed) {
@@ -3230,6 +5412,8 @@ export const createEventSchema = z.object({
     .min(5, 'Название должно быть не короче 5 символов')
     .max(100, 'Название слишком длинное'),
   
+  city: z.string().min(2, 'Укажите город'),
+
   description: z
     .string()
     .trim()
@@ -3237,7 +5421,7 @@ export const createEventSchema = z.object({
     .max(1200, 'Описание слишком длинное'),
   
   category: z.enum(CATEGORIES, {
-    errorMap: () => ({ message: 'Недопустимая категория' }),
+    message: 'Недопустимая категория',
   }),
   
   location: z
@@ -4079,6 +6263,401 @@ $sizeKb = [math]::Round((Get-Item $Output).Length / 1KB, 1)
 Write-Host "Готово: $Output ($($files.Count) файлов, $sizeKb KB)" -ForegroundColor Green
 ````
 
+### `tools/project-bundle.md`
+
+``md
+# Project bundle
+
+Generated: 2026-10-22 16:22
+Root: C:\Users\Lenovo\Downloads\event_mp\namylimsya-app\tools
+
+## Tree
+
+```
+tools/
+|-- bundle-project.ps1
+\-- bundle-security-md.ps1
+```
+
+## Files
+
+### `bundle-project.ps1`
+
+``powershell
+# tools/bundle-project.ps1  (ASCII-only, safe in any encoding)
+param(
+    [string]$OutputFile = "project-bundle.md",
+    [string]$Root = (Get-Location).Path
+)
+
+Set-Location $Root
+$Root = (Get-Location).Path
+
+$excludeDirs = @(
+    'node_modules', '.next', '.git', 'dist', 'build', 'coverage',
+    '.turbo', '.vercel', 'out', '.idea', '.vscode', '.cache'
+)
+
+$excludeFileGlobs = @(
+    'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+    'next-env.d.ts',
+    'tree.txt', 'tree-security.txt',
+    'project-bundle.md', 'security-bundle.md',
+    '*.log',
+    'public/**/*.png', 'public/**/*.jpg', 'public/**/*.jpeg',
+    'public/**/*.svg', 'public/**/*.gif', 'public/**/*.webp',
+    'public/**/*.ico',
+    '**/*.map'
+)
+
+$binaryExt = @('.png','.jpg','.jpeg','.gif','.webp','.ico','.pdf','.zip',
+               '.woff','.woff2','.ttf','.otf','.mp4','.mp3','.lock')
+
+# --- custom recursive walk that PRUNES excluded dirs (no descent) ---
+$allFiles = New-Object System.Collections.Generic.List[object]
+
+function Walk {
+    param([string]$Dir, [string]$RelPrefix)
+
+    Get-ChildItem -LiteralPath $Dir -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        $item = $_
+
+        # skip symlinks / junctions to avoid loops
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return }
+
+        $rel = if ($RelPrefix) { "$RelPrefix/$($item.Name)" } else { $item.Name }
+
+        if ($item.PSIsContainer) {
+            if ($excludeDirs -contains $item.Name) { return }   # prune
+            Walk -Dir $item.FullName -RelPrefix $rel
+        } else {
+            foreach ($glob in $excludeFileGlobs) {
+                if ($rel -like $glob) { return }
+            }
+            $allFiles.Add([pscustomobject]@{
+                Full = $item.FullName
+                Rel  = $rel
+                Ext  = $item.Extension.ToLower()
+            })
+        }
+    }
+}
+
+Walk -Dir $Root -RelPrefix ''
+
+$allFiles = $allFiles | Sort-Object Rel
+
+# --- build tree (ASCII) ---
+$treeLines = New-Object System.Collections.Generic.List[string]
+$treeLines.Add((Split-Path $Root -Leaf) + '/')
+
+$tree = @{}
+foreach ($f in $allFiles) {
+    $parts = $f.Rel -split '/'
+    $node = $tree
+    for ($i=0; $i -lt $parts.Count; $i++) {
+        $p = $parts[$i]
+        $isFile = ($i -eq $parts.Count - 1)
+        if ($isFile) { $node[$p] = $null }
+        else {
+            if (-not $node.ContainsKey($p)) { $node[$p] = @{} }
+            $node = $node[$p]
+        }
+    }
+}
+
+function Render-Tree {
+    param($Node, [string]$Prefix)
+    $keys = $Node.Keys | Sort-Object {
+        if ($Node[$_] -eq $null) { 1 } else { 0 }
+    }, { $_ }
+    for ($i=0; $i -lt $keys.Count; $i++) {
+        $k = $keys[$i]
+        $isLast = ($i -eq $keys.Count - 1)
+        $conn = if ($isLast) { '\-- ' } else { '|-- ' }
+        $suffix = if ($Node[$k] -eq $null) { '' } else { '/' }
+        $script:treeLines.Add("$Prefix$conn$k$suffix")
+        if ($Node[$k] -ne $null) {
+            $newPrefix = $Prefix + $(if ($isLast) { '    ' } else { '|   ' })
+            Render-Tree -Node $Node[$k] -Prefix $newPrefix
+        }
+    }
+}
+Render-Tree -Node $tree -Prefix ''
+
+function Get-Lang {
+    param([string]$Ext)
+    switch ($Ext) {
+        '.ts'   { 'ts' }   '.tsx' { 'tsx' }  '.js'  { 'js' }
+        '.jsx'  { 'jsx' }  '.mjs' { 'js' }   '.cjs' { 'js' }
+        '.json' { 'json' } '.css' { 'css' }  '.scss'{ 'scss' }
+        '.html' { 'html' } '.md'  { 'md' }
+        '.yml'  { 'yaml' } '.yaml'{ 'yaml' }
+        '.ps1'  { 'powershell' }
+        '.sql'  { 'sql' }
+        '.env'  { 'bash' }
+        default { '' }
+    }
+}
+
+# --- stream output directly to file (no StringBuilder) ---
+$outPath = Join-Path $Root $OutputFile
+$utf8 = New-Object System.Text.UTF8Encoding($false)  # no BOM
+$sw = New-Object System.IO.StreamWriter($outPath, $false, $utf8)
+
+try {
+    $sw.WriteLine("# Project bundle")
+    $sw.WriteLine()
+    $sw.WriteLine("Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
+    $sw.WriteLine("Root: $Root")
+    $sw.WriteLine()
+    $sw.WriteLine("## Tree")
+    $sw.WriteLine()
+    $sw.WriteLine('```')
+    foreach ($line in $treeLines) { $sw.WriteLine($line) }
+    $sw.WriteLine('```')
+    $sw.WriteLine()
+    $sw.WriteLine("## Files")
+    $sw.WriteLine()
+
+    foreach ($f in $allFiles) {
+        $rel = $f.Rel
+        $isEnv = (Split-Path $rel -Leaf) -like '.env*'
+
+        if ($binaryExt -contains $f.Ext) {
+            $sw.WriteLine("### ``$rel``")
+            $sw.WriteLine()
+            $sw.WriteLine("_binary file, content skipped_")
+            $sw.WriteLine()
+            continue
+        }
+
+        $content = $null
+        try {
+            $content = Get-Content -LiteralPath $f.Full -Raw -Encoding utf8 -ErrorAction Stop
+        } catch {
+            $sw.WriteLine("### ``$rel``")
+            $sw.WriteLine()
+            $sw.WriteLine("_read error: $($_.Exception.Message)_")
+            $sw.WriteLine()
+            continue
+        }
+        if ($null -eq $content) { $content = '' }
+
+        $lang = Get-Lang $f.Ext
+
+        if ($isEnv) {
+            $content = ($content -split "`r?`n" | ForEach-Object {
+                if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$') {
+                    "$($Matches[1])=***REDACTED***"
+                } else { $_ }
+            }) -join "`n"
+            $lang = 'bash'
+        }
+
+        $sw.WriteLine("### ``$rel``")
+        $sw.WriteLine()
+        $sw.WriteLine("````$lang")
+        $sw.WriteLine($content)
+        $sw.WriteLine('````')
+        $sw.WriteLine()
+    }
+}
+finally {
+    $sw.Flush()
+    $sw.Close()
+}
+
+$sizeKb = [math]::Round((Get-Item $outPath).Length / 1KB, 1)
+Write-Host "OK: $outPath"
+Write-Host "   Files: $($allFiles.Count)"
+Write-Host "   Size:  $sizeKb KB"
+````
+
+### `bundle-security-md.ps1`
+
+``powershell
+<#
+.SYNOPSIS
+  Собирает один Markdown-файл из выбранных файлов проекта для аудита агентом.
+.DESCRIPTION
+  - Оглавление с размерами и количеством строк
+  - Дерево проекта
+  - Содержимое каждого файла в code-блоке с указанием языка
+  - .env.local маскируется (значения -> <REDACTED>, кроме NEXT_PUBLIC_*)
+#>
+param(
+    [string]$Output = "security-bundle.md"
+)
+
+# ==== СПИСОК НУЖНЫХ ФАЙЛОВ ====
+$include = @(
+    # Root
+    "next.config.ts",
+    "package.json",
+    "tsconfig.json",
+    "proxy.ts",
+    "eslint.config.mjs",
+    ".gitignore",
+    ".env.local",
+    "AGENTS.md",
+    "README.md",
+    # App
+    "app/layout.tsx",
+    "app/page.tsx",
+    "app/loading.tsx",
+    "app/globals.css",
+    "app/actions.ts",
+    "app/event/[id]/page.tsx",
+    "app/login/page.tsx",
+    "app/my-events/page.tsx",
+    "app/my-events/loading.tsx",
+    "app/[username]/page.tsx",
+    # Lib
+    "lib/supabase.ts",
+    "lib/supabase-server.ts",
+    # Components
+    "components/ApplicationActions.tsx",
+    "components/AvatarPicker.tsx",
+    "components/CategoryIcon.tsx",
+    "components/Countdown.tsx",
+    "components/CreateEventForm.tsx",
+    "components/EventCard.tsx",
+    "components/EventChat.tsx",
+    "components/EventList.tsx",
+    "components/Header.tsx",
+    "components/MobileFilters.tsx",
+    "components/NotificationsBell.tsx",
+    "components/PageTransition.tsx",
+    "components/Sidebar.tsx"
+)
+
+# ==== СБОР ФАЙЛОВ ====
+$root = (Get-Location).Path
+$files = $include | ForEach-Object {
+    if (Test-Path $_) { Get-Item $_ }
+} | Where-Object { -not $_.PSIsContainer } | Sort-Object FullName -Unique
+
+if (-not $files) {
+    Write-Host "Не найдено ни одного файла. Запустите из корня проекта." -ForegroundColor Red
+    exit 1
+}
+
+# ==== МАСКИРОВАНИЕ .env ====
+function Mask-EnvContent {
+    param([string]$Path)
+    $lines = Get-Content -LiteralPath $Path
+    $result = foreach ($line in $lines) {
+        # Комментарии и пустые строки — оставить как есть
+        if ($line -match '^\s*#' -or $line.Trim() -eq '') { $line; continue }
+        # KEY=VALUE
+        if ($line -match '^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
+            $key = $Matches[2]
+            $val = $Matches[3]
+            if ($key -like 'NEXT_PUBLIC_*') {
+                # Публичные ключи — показываем, но помечаем
+                "$key=$val   # ⚠️ PUBLIC: виден в браузере"
+            } else {
+                "$key=<REDACTED>"
+            }
+        } else {
+            $line
+        }
+    }
+    return ($result -join "`n")
+}
+
+# ==== ЯЗЫК ДЛЯ ПОДСВЕТКИ ====
+$extToLang = @{
+    '.tsx' = 'tsx'; '.ts' = 'ts'; '.jsx' = 'jsx'; '.js' = 'js'
+    '.json' = 'json'; '.css' = 'css'; '.scss' = 'scss'; '.md' = 'md'
+    '.html' = 'html'; '.ps1' = 'powershell'; '.mjs' = 'js'
+    '.yml' = 'yaml'; '.yaml' = 'yaml'
+}
+
+# ==== СБОРКА MARKDOWN ====
+$sb = [System.Text.StringBuilder]::new()
+
+# Заголовок
+[void]$sb.AppendLine("# Security & Improvements Audit Bundle")
+[void]$sb.AppendLine("")
+[void]$sb.AppendLine("> **Для ИИ-агента.** Проанализируй проект на безопасность (OWASP Top 10, " +
+    "Next.js App Router + Supabase, server actions, RLS, IDOR, XSS через user input, " +
+    "утечки через Realtime) и предложи улучшения (архитектура, производительность, " +
+    "читаемость, дублирование).")
+[void]$sb.AppendLine("")
+[void]$sb.AppendLine("**Метаинформация**")
+[void]$sb.AppendLine("")
+[void]$sb.AppendLine("| Поле | Значение |")
+[void]$sb.AppendLine("|---|---|")
+[void]$sb.AppendLine("| Собрано | $(Get-Date -Format 'yyyy-MM-dd HH:mm') |")
+[void]$sb.AppendLine("| Файлов | $($files.Count) |")
+[void]$sb.AppendLine("| Проект | $((Split-Path $root -Leaf)) |")
+[void]$sb.AppendLine("")
+
+# Оглавление
+[void]$sb.AppendLine("## Оглавление")
+[void]$sb.AppendLine("")
+$i = 1
+foreach ($file in $files) {
+    $rel = $file.FullName.Substring($root.Length + 1) -replace '\\','/'
+    $lines = (Get-Content -LiteralPath $file.FullName).Count
+    $sizeKb = [math]::Round($file.Length / 1KB, 1)
+    $anchor = ($rel -replace '[^\w\- ]','').ToLower() -replace ' ','-'
+    [void]$sb.AppendLine("$i. [$rel](#$anchor) — $lines строк, $sizeKb KB")
+    $i++
+}
+[void]$sb.AppendLine("")
+[void]$sb.AppendLine("---")
+[void]$sb.AppendLine("")
+
+# Дерево (плоский список, т.к. иерархия уже есть в оглавлении)
+[void]$sb.AppendLine("## Структура (только включённые файлы)")
+[void]$sb.AppendLine("")
+[void]$sb.AppendLine('```')
+foreach ($file in $files) {
+    $rel = $file.FullName.Substring($root.Length + 1) -replace '\\','/'
+    [void]$sb.AppendLine($rel)
+}
+[void]$sb.AppendLine('```')
+[void]$sb.AppendLine("")
+[void]$sb.AppendLine("---")
+[void]$sb.AppendLine("")
+
+# Содержимое
+foreach ($file in $files) {
+    $rel = $file.FullName.Substring($root.Length + 1) -replace '\\','/'
+    $ext = $file.Extension.ToLower()
+    $lang = if ($extToLang.ContainsKey($ext)) { $extToLang[$ext] } else { '' }
+
+    [void]$sb.AppendLine("## $rel")
+    [void]$sb.AppendLine("")
+    [void]$sb.AppendLine('```' + $lang)
+
+    if ($file.Name -eq '.env.local' -or $file.Name -like '.env*') {
+        [void]$sb.AppendLine((Mask-EnvContent -Path $file.FullName))
+    } else {
+        [void]$sb.AppendLine((Get-Content -LiteralPath $file.FullName -Raw))
+    }
+
+    [void]$sb.AppendLine('```')
+    [void]$sb.AppendLine("")
+}
+
+# Запись в UTF-8 без BOM
+[System.IO.File]::WriteAllText(
+    (Join-Path $root $Output),
+    $sb.ToString(),
+    [System.Text.UTF8Encoding]::new($false)
+)
+
+$sizeKb = [math]::Round((Get-Item $Output).Length / 1KB, 1)
+Write-Host "Готово: $Output ($($files.Count) файлов, $sizeKb KB)" -ForegroundColor Green
+````
+
+
+````
+
 ### `tsconfig.json`
 
 ``json
@@ -4135,11 +6714,5 @@ export default defineConfig({
     },
   },
 })
-````
-
-### `Новый текстовый документ.txt`
-
-``
-
 ````
 

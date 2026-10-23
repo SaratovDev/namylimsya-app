@@ -32,6 +32,7 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
     isOrganizer,
     organizerAvatar,
     organizerGender,
+    city,
   } = item;
 
   const { showSuccess, showError } = useToast();
@@ -50,31 +51,38 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
 
   const isActuallyOrganizer = isOrganizer || (user !== null && user.id === organizerId);
   const hasExactCoords = typeof lat === 'number' && typeof lng === 'number';
+  const isPast = new Date(dateTime) < new Date(); 
 
- const handleApply = async () => {
+  const handleApply = async () => {
     setLoading(true);
     try {
-      await applyToEvent(id);
-      setMyStatus('pending');
-      showSuccess('Заявка отправлена! Ждите подтверждения.'); // <-- Тост успеха
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Произошла ошибка';
-      showError(message); // <-- Тост ошибки (выведет точную причину)
+      const res = await applyToEvent(id);
+      if (res?.error) {
+        showError(res.error);
+      } else {
+        setMyStatus('pending');
+        showSuccess('Заявка отправлена! Ждите подтверждения.');
+      }
+    } catch {
+      showError('Произошла ошибка');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCancel = async () => {
+    const handleCancel = async () => {
     if (!confirm('Вы уверены, что хотите отменить заявку?')) return;
     setIsCanceling(true);
     try {
-      await cancelApplication(id);
-      setMyStatus(null);
-      showSuccess('Заявка отменена'); // <-- Тост успеха
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Произошла ошибка';
-      showError(message); // <-- Тост ошибки
+      const res = await cancelApplication(id);
+      if (res?.error) {
+        showError(res.error);
+      } else {
+        setMyStatus(null);
+        showSuccess('Заявка отменена');
+      }
+    } catch {
+      showError('Произошла ошибка');
     } finally {
       setIsCanceling(false);
     }
@@ -164,21 +172,29 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
         </Link>
 
         {/* Публичная метка места */}
-        <div className="flex items-center gap-1.5 text-[12px] sm:text-[13px] font-bold text-brand-muted mt-2 mb-2">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-            <circle cx="12" cy="10" r="3"></circle>
-          </svg>
-          <span className="truncate">{publicLocationLabel}</span>
+        <div className="flex flex-col gap-1 text-[12px] sm:text-[13px] font-bold text-brand-muted mt-2 mb-2">
+          <div className="flex items-center gap-1.5">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="flex-shrink-0"
+            >
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+              <circle cx="12" cy="10" r="3"></circle>
+            </svg>
+            {city && (
+              <span className=" text-brand-cat px-1.5 py-0.5 rounded text-[12px] uppercase font-bold">
+                {city}
+              </span>
+            )}
+          </div>
+          <span className="break-words leading-snug">{publicLocationLabel}</span>
         </div>
 
         <p className="text-[13px] sm:text-[14px] text-brand-text/80 mb-3 line-clamp-2 leading-relaxed">
@@ -227,13 +243,15 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
           </div>
 
           <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-            <button
-              onClick={handleApply}
-              disabled={buttonDisabled}
-              className={`flex-1 sm:flex-none font-extrabold text-[11px] sm:text-[13px] uppercase px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-brand-line rounded-brand transition-colors ${buttonClass}`}
-            >
-              {buttonText}
-            </button>
+             {!isPast && (
+              <button
+                onClick={handleApply}
+                disabled={buttonDisabled}
+                className={`flex-1 sm:flex-none font-extrabold text-[11px] sm:text-[13px] uppercase px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-brand-line rounded-brand transition-colors ${buttonClass}`}
+              >
+                {buttonText}
+              </button>
+            )}
 
             {/* Кнопка Чат с бейджем непрочитанных */}
             {(myStatus || isActuallyOrganizer) && (
@@ -266,7 +284,9 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
         {/* Карта */}
         {hasExactCoords && (
           <details className="mt-4 border-t border-dashed border-brand-line/30 pt-3 group">
-            <summary className="list-none cursor-pointer text-brand-muted hover:text-brand-accent font-bold text-[11px] sm:text-[12px] uppercase transition-colors flex items-center gap-1">
+                       <summary
+              className="list-none cursor-pointer text-brand-muted hover:text-brand-accent font-bold text-[11px] sm:text-[12px] uppercase transition-colors flex items-center gap-1 py-2"
+            >
               <svg
                 className="transition-transform duration-300 group-open:rotate-180"
                 width="12"

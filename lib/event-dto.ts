@@ -13,7 +13,8 @@ export type EventListItemDTO = {
   isFull: boolean;
   // публичное представление места — всегда безопасно
   publicLocationLabel: string;      // "Парк Горького" или "Место скрыто организатором"
-  locationIsHidden: boolean;        // факт скрытия, не сами данные
+  locationIsHidden: boolean;       // факт скрытия, не сами данные
+  city?: string | null;
   // точные данные — только если пользователь имеет право
   exactLocation?: string;           // undefined, если нет доступа
   lat?: number;                     // undefined, если нет доступа

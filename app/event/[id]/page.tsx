@@ -7,6 +7,10 @@ import EventChat from '@/components/EventChat';
 import ReviewForm from '@/components/ReviewForm';
 import { getViewer } from '@/lib/event-access';
 import { canSeeExactLocation } from '@/lib/event-access';
+import ScrollToTop from '@/components/ScrollToTop';
+import EventAdminActions from '@/components/EventAdminActions';
+import CancelParticipationButton from '@/components/CancelParticipationButton';
+
 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -38,7 +42,10 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   const canSeeLocation = canSeeExactLocation(event, viewer, myAppStatus);
   const hasExactCoords = typeof event.lat === 'number' && typeof event.lng === 'number' && canSeeLocation;
   const isOrganizer = viewer.kind === 'user' && viewer.userId === event.organizer_id;
-  const isPast = new Date(event.date_time) < new Date();
+
+    // Считаем событие прошедшим через 24 часа после начала
+  const eventEndTime = new Date(event.date_time).getTime() + 24 * 60 * 60 * 1000;
+  const isPast = eventEndTime < new Date().getTime();
 
   let canReview = false;
   if (viewer.kind === 'user' && isPast && myAppStatus === 'approved') {
@@ -63,7 +70,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 
   return (
     <main className="max-w-[1100px] mx-auto px-4 md:px-6 py-10 min-h-screen">
-      
+      <ScrollToTop />
       <Link href="/" className="text-brand-muted font-bold text-sm uppercase hover:text-brand-accent transition-colors mb-6 inline-block">
         ← Вернуться в ленту
       </Link>
@@ -85,7 +92,10 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
               </p>
               <p className="flex items-center gap-2">
                 <span className="text-brand-accent text-lg">📍</span>
-                {canSeeLocation ? event.location : "Место скрыто организатором"} 
+                <span>
+                  {event.city ? `${event.city}, ` : ''}
+                  {canSeeLocation ? event.location : "Место скрыто организатором"}
+                </span>
               </p>
               
               {isPast && (
@@ -131,6 +141,18 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
       </div>
+
+          {isOrganizer && (
+            <div className="mt-4 pt-4 border-t-2 border-dashed border-brand-line">
+              <EventAdminActions eventId={event.id} eventTitle={event.title} />
+            </div>
+          )}
+
+          {myAppStatus === 'approved' && (
+          <div className="mt-4">
+            <CancelParticipationButton eventId={event.id} eventTitle={event.title} />
+          </div>
+        )}
 
       {/* Кнопка оставить отзыв */}
       {canReview && (

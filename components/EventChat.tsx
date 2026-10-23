@@ -30,7 +30,7 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const { showSuccess, showError } = useToast();
+  const {showError } = useToast();
   
   
   
@@ -173,9 +173,25 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
     };
   }, [eventId]);
 
+
+  const isFirstLoad = useRef(true);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // При первой загрузке ничего не скроллим
+    if (isFirstLoad.current) {
+      isFirstLoad.current = false;
+      return;
+    }
+    
+    // Находим сам контейнер чата (у которого overflow-y-auto)
+    const chatContainer = messagesEndRef.current?.closest('.overflow-y-auto');
+    
+    // Скроллим только внутренний контейнер чата, НЕ трогая саму страницу
+    if (chatContainer) {
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
   }, [messages]);
+
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -275,7 +291,7 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
                           setReplyingTo(msg);
                           inputRef.current?.focus();
                         }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-brand-muted hover:text-brand-accent p-1 order-first"
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-brand-muted hover:text-brand-accent p-1"
                         title="Ответить"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
@@ -303,7 +319,7 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
                         setReplyingTo(msg);
                         inputRef.current?.focus();
                       }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-brand-muted hover:text-brand-accent p-1"
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-brand-muted hover:text-brand-accent p-1"
                         title="Ответить"
                       >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
