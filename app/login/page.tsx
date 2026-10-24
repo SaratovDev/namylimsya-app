@@ -106,6 +106,43 @@ function LoginForm() {
         </div>
       )}
 
+      {/* Telegram Login Widget */}
+      <div className="flex flex-col items-center mb-6">
+        <div id="telegram-login-container"></div>
+        
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.onTelegramAuth = function (user) {
+                fetch('${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/telegram-auth', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(user)
+                })
+                .then(res => res.json())
+                .then(data => {
+                  if (data.token) {
+                    // Входим через хэш-токен
+                    window.location.href = '/auth/callback?token=' + data.token;
+                  } else {
+                    alert('Ошибка входа');
+                  }
+                });
+              };
+            `
+          }}
+        />
+        
+        <script 
+          async 
+          src="https://telegram.org/js/telegram-widget.js?22" 
+          data-telegram-login="namylimsya_bot" 
+          data-size="large" 
+          data-onauth="onTelegramAuth(user)" 
+          data-request-access="write"
+        ></script>
+      </div>
+
       <form onSubmit={handleAuth} className="flex flex-col gap-4">
         
         {/* Поле никнейма только для регистрации */}
