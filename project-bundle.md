@@ -1,6 +1,6 @@
 # Project bundle
 
-Generated: 2026-10-23 11:34
+Generated: 2026-10-24 16:23
 Root: C:\Users\Lenovo\Downloads\event_mp\namylimsya-app
 
 ## Tree
@@ -13,7 +13,18 @@ namylimsya-app/
 |   |-- [username]/
 |   |   |-- page.tsx
 |   |   \-- page_old.tsx
+|   |-- admin/
+|   |   |-- events/
+|   |   |   \-- p
+|   |   |-- support/
+|   |   |   \-- p
+|   |   |-- users/
+|   |   |   \-- p
+|   |   |-- layout.tsx
+|   |   \-- page.tsx
 |   |-- archive/
+|   |   \-- p
+|   |-- banned/
 |   |   \-- p
 |   |-- event/
 |   |   \-- [
@@ -26,6 +37,10 @@ namylimsya-app/
 |   |   \-- page.tsx
 |   |-- reset-password/
 |   |   \-- p
+|   |-- settings/
+|   |   \-- p
+|   |-- support/
+|   |   \-- p
 |   |-- actions.ts
 |   |-- error.tsx
 |   |-- favicon.ico
@@ -35,6 +50,11 @@ namylimsya-app/
 |   |-- not-found.tsx
 |   \-- page.tsx
 |-- components/
+|   |-- admin/
+|   |   |-- AdminEventActions.tsx
+|   |   |-- TicketActions.tsx
+|   |   \-- UserActions.tsx
+|   |-- AppealForm.tsx
 |   |-- ApplicationActions.tsx
 |   |-- AvatarPicker.tsx
 |   |-- CancelModal.tsx
@@ -60,6 +80,8 @@ namylimsya-app/
 |   |-- Sidebar.tsx
 |   \-- Toast.tsx
 |-- lib/
+|   |-- achievements.ts
+|   |-- admin-utils.ts
 |   |-- event-access.ts
 |   |-- event-dto.ts
 |   |-- event-queries.ts
@@ -207,8 +229,10 @@ import { notFound } from 'next/navigation';
 import EventCard from '@/components/EventCard';
 import AvatarPicker from '@/components/AvatarPicker';
 import Image from 'next/image';
+import Link from 'next/link';
 import { getViewer } from '@/lib/event-access';
 import { getEventListDTOs } from '@/lib/event-queries';
+import { getBadgeStatus, ORGANIZER_BADGES, PARTICIPANT_BADGES } from '@/lib/achievements';
 
 export default async function ProfilePage({ params }: { params: Promise<{ username: string }> }) {
   const { username } = await params;
@@ -228,8 +252,10 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
   if (!profile) notFound();
 
   const isOwnProfile = user?.id === profile.id;
+  const isFemale = profile.gender === 'female';
+  const genderSuffix = isFemale ? 'а' : ''; // Для "организовалА" и "посетилА"
 
-  // 2. Получаем рейтинг организатора (вызов RPC)
+  // 2. Получаем рейтинг организатора
   const { data: ratingData } = await supabase
     .rpc('get_organizer_rating', { org_id: profile.id })
     .single<{ average_rating: number; total_reviews: number }>();
@@ -237,12 +263,53 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
   const rating = ratingData?.average_rating || 0;
   const reviewsCount = ratingData?.total_reviews || 0;
 
-  // 3. Получаем безопасные DTO событий
+  // 3. Получаем статистику (только ПРОШЕДШИЕ события)
+  const now = new Date().toISOString();
+  
+  // Успешно организовал (события, которые прошли и не были отменены)
+  const { count: eventsOrganized } = await supabase
+    .from('events')
+    .select('*', { count: 'exact', head: true })
+    .eq('organizer_id', profile.id)
+    .lt('date_time', now)
+    .eq('status', 'active');
+
+  // Успешно посетил (заявки approved на события, которые прошли)
+  // Сначала получаем ID событий, на которые он подтвержден
+  const { data: approvedApps } = await supabase
+    .from('applications')
+    .select('event_id')
+    .eq('user_id', profile.id)
+    .eq('status', 'approved');
+
+  const approvedEventIds = approvedApps?.map(a => a.event_id) || [];
+
+  let eventsAttended = 0;
+  if (approvedEventIds.length > 0) {
+    const { count } = await supabase
+      .from('events')
+      .select('*', { count: 'exact', head: true })
+      .in('id', approvedEventIds)
+      .lt('date_time', now)
+      .eq('status', 'active');
+    eventsAttended = count || 0;
+  }
+
+    // Определяем бейджи
+  const orgBadgeData = getBadgeStatus(eventsOrganized || 0, ORGANIZER_BADGES);
+  const partBadgeData = getBadgeStatus(eventsAttended || 0, PARTICIPANT_BADGES);
+
+  // Собираем массив для отображения (только текущие бейджи)
+  const displayBadges = [];
+  if (orgBadgeData.current) displayBadges.push({ ...orgBadgeData.current, type: 'organizer', progress: orgBadgeData.progress, next: orgBadgeData.next });
+  if (partBadgeData.current) displayBadges.push({ ...partBadgeData.current, type: 'participant', progress: partBadgeData.progress, next: partBadgeData.next });
+
+  // 4. Получаем безопасные DTO событий для отображения внизу
   const viewer = await getViewer(supabase);
   const { items: allEvents } = await getEventListDTOs(supabase, viewer, 1000, 0);
   const userEvents = allEvents.filter(e => e.organizerId === profile.id);
 
-  // 4. Получаем последние 5 отзывов для отображения
+  // 5. Получаем последние 5 отзывов
   const { data: recentReviews } = await supabase
     .from('reviews')
     .select(`
@@ -256,107 +323,226 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
 
   const avatarLetter = profile.username.charAt(0).toUpperCase();
   const genderIcon = profile.gender === 'male' ? '♂' : profile.gender === 'female' ? '♀' : '';
+  const genderText = profile.gender === 'male' ? 'Мужской' : profile.gender === 'female' ? 'Женский' : 'Не указан';
 
   return (
-    <main className="max-w-[1280px] mx-auto px-6 py-10 min-h-screen">
+    <main className="max-w-[1100px] mx-auto px-4 md:px-6 py-10 min-h-screen">
       
-      {/* Шапка профиля */}
-      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8 mb-8 flex flex-col md:flex-row items-center gap-6">
+      {/* Сетка: Левая часть (Инфо) и Правая (Статистика) */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 mb-10">
         
-        {/* Аватарка */}
-        <div className="flex flex-col items-center gap-3">
-          <div className={`w-24 h-24 rounded-full border-2 border-brand-line flex items-center justify-center text-4xl font-extrabold flex-shrink-0 overflow-hidden
-            ${profile.gender === 'male' ? 'bg-blue-100 text-blue-800' : 
-              profile.gender === 'female' ? 'bg-pink-100 text-pink-800' : 
-              'bg-gray-200 text-gray-700'}
-          `}>
-            {profile.avatar_url ? (
-              <div className="w-full h-full">
-                <Image src={profile.avatar_url} alt={profile.username} width={96} height={96} className="w-full h-full object-cover" />
+        {/* === ЛЕВАЯ КОЛОНКА: ОСНОВНАЯ ИНФО === */}
+        <div className="bg-brand-surface border border-brand-line rounded-brand-lg p-6 md:p-8">
+          <div className="flex flex-col md:flex-row gap-6 md:gap-8 items-center md:items-start">
+            
+            {/* Аватар и награды */}
+            <div className="flex flex-col items-center gap-4 shrink-0">
+              <div className={`w-32 h-32 rounded-full border-4 flex items-center justify-center text-5xl font-extrabold overflow-hidden
+                ${profile.gender === 'male' ? 'bg-blue-100 text-blue-800 border-blue-400' : 
+                  profile.gender === 'female' ? 'bg-pink-100 text-pink-800 border-pink-400' : 
+                  'bg-gray-200 text-gray-700 border-brand-line'}
+              `}>
+                {profile.avatar_url ? (
+                  <Image src={profile.avatar_url} alt={profile.username} width={128} height={128} className="w-16 h-20 object-cover" />
+                ) : (
+                  avatarLetter
+                )}
               </div>
+              
+              {isOwnProfile && (
+                <AvatarPicker 
+                  currentAvatar={profile.avatar_url} 
+                  gender={profile.gender} 
+                  username={profile.username} 
+                  userId={profile.id} 
+                />
+              )}
+
+              {/* Секция "Награды и бейджи" */}
+              <div className="w-full mt-4 text-center border-t-2 border-brand-line pt-4">
+                <h3 className="text-[10px] font-extrabold uppercase text-brand-muted mb-3">Награды</h3>
+                
+                <div className="flex justify-center gap-4">
+                  {displayBadges.length === 0 && (
+                    <p className="text-xs font-bold text-brand-muted">Пока нет наград</p>
+                  )}
+
+                  {displayBadges.map((badge, idx) => {
+                    // Считаем, сколько именно шагов осталось до следующего звания
+                    const stepsLeft = badge.next ? badge.next.threshold - (badge.current?.threshold || 0) - Math.round(((badge.progress / 100) * (badge.next.threshold - (badge.current?.threshold || 0)))) : 0;
+                    
+                    return (
+                      <div key={idx} className="flex flex-col items-center group relative">
+
+                        {/* Прямоугольная медаль */}
+                        <div className={`w-16 h-32 sm:w-20 sm:h-36 rounded-[102px] flex items-center justify-center bg-brand-bg relative overflow-hidden ${badge.color}`}>
+                          <Image 
+                            src={badge.icon} 
+                            alt={badge.title} 
+                            width={80} 
+                            height={96} 
+                            className="w-full h-full object-cover z-10"
+                          />
+                        </div>
+
+                        {/* Тултип с названием и точным прогрессом */}
+                        <div className="absolute top-full mt-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none flex flex-col items-center w-max">
+                          <div className="w-2 h-2 bg-brand-text rotate-45 -mb-1"></div>
+                          <div className="bg-brand-text text-brand-bg text-[10px] font-bold px-2 py-1 rounded text-center whitespace-nowrap">
+                            <div>{badge.title}</div>
+                            {badge.next && (
+                              <div className="text-[9px] font-normal text-brand-bg/80 mt-0.5 border-t border-brand-bg/20 pt-0.5">
+                                Осталось {stepsLeft} до «{badge.next.title}»
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Плашка проверенного организатора */}
+                {profile.is_verified && (
+                  <div className="mt-4 flex items-center justify-center gap-1 text-[10px] font-bold text-blue-600">
+                    <span>✔</span> Проверенный организатор
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Текстовая инфа */}
+            <div className="flex-1 flex flex-col gap-4 text-center md:text-left">
+              
+              <div className="flex flex-col md:flex-row md:items-center gap-3 border-b-2 border-dashed border-brand-line pb-3">
+                <h1 className="text-3xl md:text-4xl font-extrabold uppercase flex items-center justify-center md:justify-start gap-2">
+                  @{profile.username}
+                  {genderIcon && <span className="text-brand-accent text-2xl">{genderIcon}</span>}
+                </h1>
+                
+                {isOwnProfile && (
+                  <Link 
+                    href="/settings" 
+                    className="bg-brand-bg border-2 border-brand-line rounded-brand px-3 py-1 text-xs font-extrabold uppercase hover:bg-brand-surface transition-colors mx-auto md:mx-0 w-fit"
+                  >
+                    Редактировать
+                  </Link>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 text-sm font-bold text-brand-muted">
+                <span>{genderText}</span>
+                {profile.age && <span>• {profile.age} лет</span>}
+                {profile.city && <span>• {profile.city}</span>}
+              </div>
+
+              {/* Соцсети */}
+              <div className="flex flex-wrap justify-center md:justify-start gap-3">
+                {profile.telegram && (
+                  <a href={`https://t.me/${profile.telegram.replace('@', '')}`} target="_blank" className="text-xs font-bold bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition-colors">
+                    Telegram: @{profile.telegram.replace('@', '')}
+                  </a>
+                )}
+                {profile.vk && (
+                  <a href={`https://vk.com/${profile.vk}`} target="_blank" className="text-xs font-bold bg-blue-50 text-blue-800 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition-colors">
+                    VK
+                  </a>
+                )}
+              </div>
+
+              <div className="mt-2">
+                <h3 className="text-xs font-extrabold uppercase text-brand-muted mb-1">О себе</h3>
+                {profile.bio ? (
+                  <p className="text-sm font-medium whitespace-pre-wrap leading-relaxed">{profile.bio}</p>
+                ) : (
+                  <p className="text-sm font-bold text-brand-muted italic">Пользователь пока ничего не рассказал о себе.</p>
+                )}
+              </div>
+
+              {profile.interests && profile.interests.length > 0 && (
+                <div className="mt-2">
+                  <h3 className="text-xs font-extrabold uppercase text-brand-muted mb-2">Увлечения</h3>
+                  <div className="flex flex-wrap justify-center md:justify-start gap-2">
+                    {profile.interests.map((interest: string) => (
+                      <span key={interest} className="bg-brand-cat-soft text-brand-cat font-bold text-xs px-3 py-1 rounded-full border border-brand-cat/30">
+                        {interest}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          </div>
+        </div>
+
+        {/* === ПРАВАЯ КОЛОНКА: СТАТИСТИКА === */}
+        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 h-fit sticky top-24">
+          <h2 className="text-lg font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Статистика</h2>
+          
+          <div className="flex flex-col gap-4">
+            <div className="bg-brand-bg p-3 rounded-brand border border-brand-line flex flex-col items-center text-center">
+              <span className="text-3xl font-extrabold text-brand-accent">{eventsOrganized || 0}</span>
+              <span className="text-xs font-bold text-brand-muted uppercase mt-1">Успешно организовал{genderSuffix}</span>
+            </div>
+            
+            <div className="bg-brand-bg p-3 rounded-brand border border-brand-line flex flex-col items-center text-center">
+              <span className="text-3xl font-extrabold text-green-600">{eventsAttended || 0}</span>
+              <span className="text-xs font-bold text-brand-muted uppercase mt-1">Успешно посетил{genderSuffix}</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* === НИЖНЯЯ ЧАСТЬ: СОБЫТИЯ И ОТЗЫВЫ === */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
+        
+        {/* Созданные события */}
+        <div>
+          <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Созданные события</h2>
+          <div className="flex flex-col gap-6">
+            {userEvents.length === 0 ? (
+              <p className="text-brand-muted font-bold">Этот пользователь пока не создавал событий.</p>
             ) : (
-              avatarLetter
+              userEvents.map((item) => (
+                <EventCard key={item.id} item={item} />
+              ))
             )}
           </div>
-          {isOwnProfile && (
-            <AvatarPicker 
-              currentAvatar={profile.avatar_url} 
-              gender={profile.gender} 
-              username={profile.username} 
-              userId={profile.id} 
-            />
-          )}
         </div>
 
-        {/* Инфо */}
-        <div className="text-center md:text-left flex-1">
-          <h1 className="text-3xl font-extrabold uppercase mb-1 flex items-center justify-center md:justify-start gap-2">
-            @{profile.username}
-            {genderIcon && <span className="text-brand-accent text-xl">{genderIcon}</span>}
-          </h1>
-          <p className="text-brand-muted font-bold mb-2">Организатор событий в «Намылимся»</p>
-          
-          {/* Плашка рейтинга */}
-          {reviewsCount >= 3 ? (
-            <div className="inline-flex items-center gap-1.5 bg-brand-bg px-3 py-1 rounded border-2 border-brand-line mb-4">
-              <span className="text-yellow-500 text-lg leading-none">★</span>
-              <span className="font-extrabold text-lg">{rating}</span>
-              <span className="text-brand-muted text-sm font-bold">({reviewsCount} отзывов)</span>
-            </div>
-          ) : (
-            <div className="inline-block bg-brand-bg px-3 py-1 rounded border-2 border-brand-line mb-4 text-sm font-bold text-brand-muted">
-              Новый организатор
-            </div>
-          )}
-
-          {profile.bio && (
-            <p className="text-sm font-medium bg-brand-bg p-3 rounded-brand border-2 border-brand-line inline-block">
-              {profile.bio}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Блок отзывов */}
-      {recentReviews && recentReviews.length > 0 && (
-        <div className="mb-10">
-          <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Последние отзывы</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-           
-            {recentReviews.map((review: { id: string; rating: number; comment: string | null; created_at: string; events: any; author: any; }) => {
-              const event = Array.isArray(review.events) ? review.events[0] : review.events;
-              const author = Array.isArray(review.author) ? review.author[0] : review.author;
-              
-              return (
-                <div key={review.id} className="bg-brand-surface border-2 border-brand-line rounded-brand p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-sm">@{author?.username || 'Пользователь'}</span>
-                    <div className="flex text-yellow-500 text-sm">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <span key={i}>{i < review.rating ? '★' : '☆'}</span>
-                      ))}
+        {/* Отзывы */}
+        <div className="sticky top-24 h-fit">
+          <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Отзывы</h2>
+          <div className="flex flex-col gap-4">
+            {recentReviews && recentReviews.length > 0 ? (
+              recentReviews.map((review: any) => {
+                const event = Array.isArray(review.events) ? review.events[0] : review.events;
+                const author = Array.isArray(review.author) ? review.author[0] : review.author;
+                
+                return (
+                  <div key={review.id} className="bg-brand-surface border-2 border-brand-line rounded-brand p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-sm">@{author?.username || 'Пользователь'}</span>
+                      <div className="flex text-yellow-500 text-sm">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <span key={i}>{i < review.rating ? '★' : '☆'}</span>
+                        ))}
+                      </div>
                     </div>
+                    {event && <div className="text-[11px] text-brand-muted font-bold mb-2 uppercase">Событие: {event.title}</div>}
+                    {review.comment && <p className="text-sm italic text-brand-text/80">&quot;{review.comment}&quot;</p>}
                   </div>
-                  {event && <div className="text-[11px] text-brand-muted font-bold mb-2 uppercase">Событие: {event.title}</div>}
-                  {review.comment && <p className="text-sm italic text-brand-text/80">`&quot`{review.comment}`&quot`</p>}
-                </div>
-              );
-            })}
+                );
+              })
+            ) : (
+              <p className="text-sm font-bold text-brand-muted bg-brand-surface border-2 border-brand-line rounded p-4 text-center">Отзывов пока нет.</p>
+            )}
           </div>
         </div>
-      )}
-
-      <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Созданные события</h2>
-      
-      <div className="flex flex-col gap-6">
-        {userEvents.length === 0 ? (
-          <p className="text-brand-muted font-bold">Этот пользователь пока не создавал событий.</p>
-        ) : (
-          userEvents.map((item) => (
-            <EventCard key={item.id} item={item} />
-          ))
-        )}
       </div>
+
     </main>
   );
 }
@@ -486,20 +672,19 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
 
 import { createClient } from '@/lib/supabase-server';
 import { revalidatePath } from 'next/cache';
-
-// --- Создание события (оставляем как было, доработаем в P1.4) ---
-// app/actions.ts (начало файла — добавь импорт)
 import { createEventSchema } from '@/lib/validations';
-
-// ...
 
 export async function createEvent(formData: FormData) {
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  if (authError || !user) return { error: 'Необходимо войти в аккаунт' };
+  if (!user) return { error: 'Необходимо войти в аккаунт' };
 
-  // ПРОВЕРКА ЛИМИТА
+  // ПРОВЕРКА НА БАН
+  const { data: bannedProfile } = await supabase.from('profiles').select('is_banned').eq('id', user.id).single();
+  if (bannedProfile?.is_banned) return { error: 'Ваш аккаунт заблокирован. Вы не можете создавать события.' };
+
+  // ПРОВЕРКА ЛИМИТА (не более 2 активных)
   const { count: activeEvents, error: countError } = await supabase
     .from('events')
     .select('*', { count: 'exact', head: true })
@@ -511,7 +696,7 @@ export async function createEvent(formData: FormData) {
     return { error: 'У вас уже есть 2 активных события. Дождитесь их завершения, чтобы создать новое.' };
   }
 
-  // 1. Сбор данных
+  // Сбор данных
   const dateStr = formData.get('date') as string | null;
   const timeStr = formData.get('time') as string | null;
   
@@ -530,7 +715,7 @@ export async function createEvent(formData: FormData) {
     city: formData.get('city'),
   };
 
-  // 2. Валидация
+  // Валидация
   const result = createEventSchema.safeParse(rawData);
   
   if (!result.success) {
@@ -540,7 +725,7 @@ export async function createEvent(formData: FormData) {
 
   const { title, description, city, category, location, max_participants, lat, lng, date_time, hide_location } = result.data;
 
-  // 3. Никнейм организатора
+  // Никнейм организатора
   const { data: profile } = await supabase
     .from('profiles')
     .select('username')
@@ -549,14 +734,14 @@ export async function createEvent(formData: FormData) {
 
   const organizerName = profile?.username || 'Пользователь';
 
-  // 4. Вставка в БД
+  // Вставка в БД (rankTitle больше не нужен, ставим базовый)
   const { error } = await supabase
     .from('events')
     .insert([{
       title, description, category, date_time, location, lat, lng, max_participants, hide_location,
       organizer_name: organizerName,
       organizer_id: user.id,
-      organizer_rank: 'Инициатор',
+      organizer_rank: 'Инициатор', 
       city,
     }]);
 
@@ -569,11 +754,14 @@ export async function createEvent(formData: FormData) {
   return { success: true };
 }
 
-// --- НОВОЕ: Подача заявки на сервере ---
+// --- Подача заявки ---
 export async function applyToEvent(eventId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: 'Не авторизован' };
+
+  const { data: profile } = await supabase.from('profiles').select('is_banned').eq('id', user.id).single();
+  if (profile?.is_banned) return { error: 'Ваш аккаунт заблокирован.' };
 
   const { data: eventCheck } = await supabase
     .from('events')
@@ -585,7 +773,6 @@ export async function applyToEvent(eventId: string) {
     return { error: 'Вы не можете подать заявку на свое же событие' };
   }
 
-  // 1. Проверяем лимит в 3 активные заявки
   const { count, error: countError } = await supabase
     .from('applications')
     .select('*', { count: 'exact', head: true })
@@ -595,7 +782,6 @@ export async function applyToEvent(eventId: string) {
   if (countError) return { error: 'Ошибка проверки лимита' };
   if (count && count >= 3) return { error: 'Вы достигли лимита в 3 активные заявки' };
 
-  // 2. Подаем заявку (статус и user_id жестко заданы на сервере)
   const { error } = await supabase.from('applications').insert([{
     event_id: eventId,
     user_id: user.id,
@@ -607,7 +793,6 @@ export async function applyToEvent(eventId: string) {
     return { error: 'Ошибка подачи заявки' };
   }
 
-  // 3. Уведомление организатору
   const { data: event } = await supabase.from('events').select('organizer_id, title').eq('id', eventId).single();
   if (event) {
     await supabase.from('notifications').insert({
@@ -619,10 +804,10 @@ export async function applyToEvent(eventId: string) {
 
   revalidatePath('/');
   revalidatePath('/my-events');
-  return { success: true }; // Возвращаем успех
+  return { success: true };
 }
 
-// --- НОВОЕ: Отмена заявки ---
+// --- Отмена заявки ---
 export async function cancelApplication(eventId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -641,7 +826,7 @@ export async function cancelApplication(eventId: string) {
   return { success: true };
 }
 
-// --- ОБНОВЛЕНО: Подтверждение заявки (вызов RPC) ---
+// --- Подтверждение заявки ---
 export async function approveApplication(applicationId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -659,7 +844,7 @@ export async function approveApplication(applicationId: string) {
   return { success: true };
 }
 
-// --- ОБНОВЛЕНО: Отклонение заявки (вызов RPC) ---
+// --- Отклонение заявки ---
 export async function rejectApplication(applicationId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -675,7 +860,8 @@ export async function rejectApplication(applicationId: string) {
   revalidatePath('/my-events');
   return { success: true };
 } 
-// --- ОБНОВЛЕНО: Оставить отзыв ---
+
+// --- Оставить отзыв ---
 export async function leaveReview(eventId: string, rating: number, comment: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -702,6 +888,7 @@ export async function leaveReview(eventId: string, rating: number, comment: stri
   return { success: true };
 }
 
+// --- Отмена события ---
 export async function cancelEvent(eventId: string, reason: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -716,11 +903,9 @@ export async function cancelEvent(eventId: string, reason: string) {
   if (!event) return { error: 'Событие не найдено' };
   if (event.organizer_id !== user.id) return { error: 'Вы не являетесь организатором' };
 
-  // Получаем имя орга для уведомления
   const { data: profile } = await supabase.from('profiles').select('username').eq('id', user.id).single();
   const orgName = profile?.username || 'Организатор';
 
-  // Меняем статус на cancelled и сохраняем причину
   const { error } = await supabase
     .from('events')
     .update({ status: 'cancelled', cancel_reason: reason })
@@ -728,7 +913,6 @@ export async function cancelEvent(eventId: string, reason: string) {
 
   if (error) return { error: 'Не удалось отменить событие' };
 
-  // Рассылаем уведомления всем участникам (и pending, и approved)
   const { data: apps } = await supabase.from('applications').select('user_id').eq('event_id', eventId);
   
   if (apps && apps.length > 0) {
@@ -742,6 +926,7 @@ export async function cancelEvent(eventId: string, reason: string) {
 
   revalidatePath('/');
   revalidatePath('/my-events');
+  revalidatePath(`/event/${eventId}`);
   return { success: true };
 }
 
@@ -750,14 +935,12 @@ export async function cancelApprovedApplication(eventId: string, reason: string)
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: 'Не авторизован' };
 
-  // Получаем инфу о событии и пользователе
   const { data: event } = await supabase.from('events').select('organizer_id, title').eq('id', eventId).single();
   const { data: profile } = await supabase.from('profiles').select('username').eq('id', user.id).single();
   
   if (!event) return { error: 'Событие не найдено' };
   const userName = profile?.username || 'Пользователь';
 
-  // Удаляем заявку (физически), так как человек передумал
   const { error } = await supabase
     .from('applications')
     .delete()
@@ -766,7 +949,6 @@ export async function cancelApprovedApplication(eventId: string, reason: string)
 
   if (error) return { error: 'Не удалось отменить заявку' };
 
-  // Уведомляем организатора
   await supabase.from('notifications').insert({
     user_id: event.organizer_id,
     content: `Участник @${userName} снял заявку на событие «${event.title}». Причина: ${reason}`,
@@ -778,14 +960,12 @@ export async function cancelApprovedApplication(eventId: string, reason: string)
   return { success: true };
 }
 
-
 // --- ЧАТ: Отметить как прочитанное ---
 export async function markChatAsRead(eventId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
 
-  // 1. Пробуем обновить существующую запись
   const { data: updated, error: updateError } = await supabase
     .from('chat_reads')
     .update({ last_read_at: new Date().toISOString() })
@@ -798,29 +978,19 @@ export async function markChatAsRead(eventId: string) {
     return;
   }
 
-  // 2. Если записи не было (0 строк обновлено), создаем новую
   if (!updated || updated.length === 0) {
     const { error: insertError } = await supabase
       .from('chat_reads')
-      .insert({ 
-        user_id: user.id, 
-        event_id: eventId, 
-        last_read_at: new Date().toISOString() 
-      });
-      
-    if (insertError) {
-      console.error('Ошибка создания записи прочтения:', insertError);
-    }
+      .insert({ user_id: user.id, event_id: eventId, last_read_at: new Date().toISOString() });
+    if (insertError) console.error('Ошибка создания записи прочтения:', insertError);
   }
 }
 
-// --- ЧАТ: Получить количество непрочитанных для списка событий ---
 export async function getUnreadCounts(eventIds: string[]) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user || eventIds.length === 0) return {};
 
-  // 1. Получаем время последнего прочтения для каждого чата
   const { data: reads } = await supabase
     .from('chat_reads')
     .select('event_id, last_read_at')
@@ -828,18 +998,15 @@ export async function getUnreadCounts(eventIds: string[]) {
     .eq('user_id', user.id);
 
   const readMap = new Map(reads?.map(r => [r.event_id, r.last_read_at]) || []);
-
-  // 2. Считаем количество сообщений после времени прочтения для каждого чата
   const counts: Record<string, number> = {};
   
   for (const eventId of eventIds) {
     const lastRead = readMap.get(eventId);
-    
     let query = supabase
       .from('messages')
       .select('*', { count: 'exact', head: true })
       .eq('event_id', eventId)
-      .neq('user_id', user.id); // Не считаем свои сообщения
+      .neq('user_id', user.id);
 
     if (lastRead) {
       query = query.gt('created_at', lastRead);
@@ -852,7 +1019,594 @@ export async function getUnreadCounts(eventIds: string[]) {
   }
 
   return counts;
-  } 
+} 
+
+// --- АДМИНКА ---
+export async function updateUserRole(targetUserId: string, newRole: 'user' | 'moderator' | 'admin') {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Не авторизован' };
+
+  const { data: myProfile, error: profileError } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  if (profileError) return { error: 'Ошибка проверки прав' };
+  if (myProfile?.role !== 'admin') return { error: 'Только администратор может менять роли' };
+  if (user.id === targetUserId) return { error: 'Вы не можете изменить свою собственную роль' };
+
+  const { error, data } = await supabase.from('profiles').update({ role: newRole }).eq('id', targetUserId).select();
+  if (error) return { error: 'Не удалось изменить роль: ' + error.message };
+  if (!data || data.length === 0) return { error: 'Пользователь не найден или нет прав' };
+
+  revalidatePath('/admin/users');
+  return { success: true };
+}
+
+export async function toggleUserBan(targetUserId: string, isBanned: boolean) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Не авторизован' };
+
+  const { data: myProfile, error: profileError } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  if (profileError) return { error: 'Ошибка проверки прав' };
+  if (myProfile?.role !== 'admin') return { error: 'Только администратор может банить' };
+  if (user.id === targetUserId) return { error: 'Вы не можете забанить себя' };
+
+  const { error, data } = await supabase.from('profiles').update({ is_banned: isBanned }).eq('id', targetUserId).select();
+  if (error) return { error: 'Не удалось изменить статус: ' + error.message };
+  if (!data || data.length === 0) return { error: 'Пользователь не найден или нет прав' };
+
+  revalidatePath('/admin/users');
+  return { success: true };
+}
+
+export async function adminDeleteEvent(eventId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Не авторизован' };
+
+  const { data: myProfile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  if (myProfile?.role !== 'admin' && myProfile?.role !== 'moderator') return { error: 'Недостаточно прав' };
+
+  const { error } = await supabase.from('events').delete().eq('id', eventId);
+  if (error) return { error: 'Не удалось удалить событие' };
+
+  revalidatePath('/admin/events');
+  revalidatePath('/');
+  return { success: true };
+}
+````
+
+### `app/admin/events/page.tsx`
+
+``tsx
+import { createClient } from '@/lib/supabase-server';
+import { requireAdmin } from '@/lib/admin-utils';
+import AdminEventActions from '@/components/admin/AdminEventActions';
+import Link from 'next/link';
+
+export default async function AdminEventsPage() {
+  await requireAdmin(); // Проверка доступа
+
+  const supabase = await createClient();
+  
+  // Получаем все события с информацией об организаторах
+  const { data: events } = await supabase
+    .from('events')
+    .select(`
+      id,
+      title,
+      date_time,
+      status,
+      created_at,
+      organizer_name,
+      profiles!events_organizer_profile_fkey ( username )
+    `)
+    .order('created_at', { ascending: false });
+
+  return (
+    <div className="max-w-6xl">
+      <div className="flex items-end justify-between mb-8 border-b-2 border-brand-line pb-4">
+        <div>
+          <h1 className="text-3xl font-extrabold uppercase">События</h1>
+          <p className="text-sm font-bold text-brand-muted mt-1">Управление всеми событиями на платформе</p>
+        </div>
+        <div className="text-sm font-extrabold bg-brand-surface px-4 py-2 border-2 border-brand-line rounded-brand">
+          Всего: {events?.length || 0}
+        </div>
+      </div>
+
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b-2 border-brand-line bg-brand-bg">
+              <th className="p-4 text-xs font-extrabold uppercase text-brand-muted">Событие</th>
+              <th className="p-4 text-xs font-extrabold uppercase text-brand-muted">Организатор</th>
+              <th className="p-4 text-xs font-extrabold uppercase text-brand-muted">Дата</th>
+              <th className="p-4 text-xs font-extrabold uppercase text-brand-muted">Статус</th>
+              <th className="p-4 text-xs font-extrabold uppercase text-brand-muted text-right">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            {events?.map((e) => {
+              const org = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles;
+              return (
+                <tr key={e.id} className="border-b border-brand-line/50 hover:bg-brand-bg/50 transition-colors">
+                  <td className="p-4">
+                    <Link href={`/event/${e.id}`} target="_blank" className="font-bold text-sm hover:text-brand-accent hover:underline">
+                      {e.title}
+                    </Link>
+                  </td>
+                  <td className="p-4 text-sm font-bold text-brand-muted">
+                    <Link href={`/@${org?.username || e.organizer_name}`} target="_blank" className="hover:text-brand-accent">
+                      @{org?.username || e.organizer_name}
+                    </Link>
+                  </td>
+                  <td className="p-4 text-sm font-bold text-brand-muted">
+                    {new Date(e.date_time).toLocaleDateString('ru-RU')}
+                  </td>
+                  <td className="p-4">
+                    <span className={`text-[10px] font-extrabold uppercase px-2 py-1 rounded border ${
+                      e.status === 'cancelled' ? 'bg-red-100 text-red-700 border-red-300' : 
+                      new Date(e.date_time) < new Date() ? 'bg-gray-100 text-gray-700 border-gray-300' :
+                      'bg-green-100 text-green-700 border-green-300'
+                    }`}>
+                      {e.status === 'cancelled' ? 'Отменено' : new Date(e.date_time) < new Date() ? 'В архиве' : 'Активно'}
+                    </span>
+                  </td>
+                  <td className="p-4 text-right">
+                    <AdminEventActions eventId={e.id} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+````
+
+### `app/admin/layout.tsx`
+
+``tsx
+import { requireAdmin } from '@/lib/admin-utils';
+import Link from 'next/link';
+import { ReactNode } from 'react';
+import { createClient } from '@/lib/supabase-server';
+
+export default async function AdminLayout({ children }: { children: ReactNode }) {
+  // Защита: если мы здесь, значит юзер — админ или модератор
+  const { role } = await requireAdmin();
+
+  // Считаем новые тикеты
+  const supabase = await createClient();
+  const { count: newTickets } = await supabase
+    .from('support_tickets')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'new');
+
+  return (
+    <div className="min-h-screen bg-brand-bg flex flex-col md:flex-row">
+      
+      {/* Боковое меню */}
+      <aside className="w-full md:w-64 bg-brand-surface border-b-2 md:border-b-0 md:border-r-2 border-brand-line flex-shrink-0">
+        <div className="p-6 border-b-2 border-brand-line">
+          <h2 className="text-xl font-extrabold uppercase">
+            Админка <span className="text-brand-accent">Намылимся</span>
+          </h2>
+          <p className="text-xs font-bold text-brand-muted mt-1 uppercase">
+            Ваша роль: {role === 'admin' ? 'Администратор' : 'Модератор'}
+          </p>
+        </div>
+        
+        <nav className="flex flex-col p-4 gap-2">
+          <Link 
+            href="/admin" 
+            className="font-bold p-3 rounded-brand hover:bg-brand-bg transition-colors"
+          >
+            📊 Дашборд
+          </Link>
+          <Link 
+            href="/admin/events" 
+            className="font-bold p-3 rounded-brand hover:bg-brand-bg transition-colors"
+          >
+            📅 События
+          </Link>
+          {role === 'admin' && (
+            <Link 
+              href="/admin/users" 
+              className="font-bold p-3 rounded-brand hover:bg-brand-bg transition-colors"
+            >
+              👥 Пользователи
+            </Link>
+          )}
+
+           <Link 
+            href="/admin/support" 
+            className="font-bold p-3 rounded-brand hover:bg-brand-bg transition-colors flex justify-between items-center"
+          >
+            <span>✉️ Обращения</span>
+            {newTickets && newTickets > 0 ? (
+              <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                {newTickets}
+              </span>
+            ) : null}
+          </Link>
+          
+          <div className="mt-auto pt-4 border-t-2 border-dashed border-brand-line">
+            <Link 
+              href="/" 
+              className="font-bold text-brand-muted hover:text-brand-accent p-3 block transition-colors"
+            >
+              ← Назад на сайт
+            </Link>
+          </div>
+        </nav>
+      </aside>
+
+      {/* Контент */}
+      <main className="flex-1 p-6 md:p-10 overflow-x-auto">
+        {children}
+      </main>
+    </div>
+  );
+}
+````
+
+### `app/admin/page.tsx`
+
+``tsx
+import { createClient } from '@/lib/supabase-server';
+import Link from 'next/link';
+
+export default async function AdminDashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ period?: string }>;
+}) {
+  const supabase = await createClient();
+  
+  const params = await searchParams;
+  const period = params.period || '7d';
+  
+  let dateLimit = new Date();
+  if (period === 'today') dateLimit.setHours(0, 0, 0, 0);
+  else if (period === '7d') dateLimit.setDate(dateLimit.getDate() - 7);
+  else if (period === '30d') dateLimit.setDate(dateLimit.getDate() - 30);
+  else if (period === 'all') dateLimit = new Date(0);
+
+  const limitIso = dateLimit.toISOString();
+
+  // --- 1. Базовые метрики за период ---
+  const [
+    { count: usersCount },
+    { count: eventsCount },
+    { count: appsCount },
+    { data: topCategories },
+    { data: topOrganizers }
+  ] = await Promise.all([
+    supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('created_at', limitIso),
+    supabase.from('events').select('*', { count: 'exact', head: true }).gte('created_at', limitIso),
+    supabase.from('applications').select('*', { count: 'exact', head: true }).gte('created_at', limitIso),
+    supabase.from('events').select('category').gte('created_at', limitIso),
+    supabase.from('events').select('organizer_name').gte('created_at', limitIso),
+  ]);
+
+  // --- 2. Воронка (Всё время, чтобы видеть реальную конверсию) ---
+  const [
+    { count: totalApps },
+    { count: approvedApps },
+    { count: pendingApps },
+    { count: rejectedApps },
+    { count: cancelledEvents }
+  ] = await Promise.all([
+    supabase.from('applications').select('*', { count: 'exact', head: true }),
+    supabase.from('applications').select('*', { count: 'exact', head: true }).eq('status', 'approved'),
+    supabase.from('applications').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+    supabase.from('applications').select('*', { count: 'exact', head: true }).eq('status', 'rejected'),
+    supabase.from('events').select('*', { count: 'exact', head: true }).eq('status', 'cancelled'),
+  ]);
+
+  // --- 3. График активности (за последние 14 дней) ---
+  const fourteenDaysAgo = new Date();
+  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+  fourteenDaysAgo.setHours(0, 0, 0, 0);
+
+  const { data: chartEvents } = await supabase
+    .from('events')
+    .select('created_at')
+    .gte('created_at', fourteenDaysAgo.toISOString());
+
+  // Группируем по дням
+  const chartData = Array.from({ length: 14 }).map((_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (13 - i));
+    const dateString = d.toISOString().split('T')[0];
+    const count = chartEvents?.filter(e => e.created_at.startsWith(dateString)).length || 0;
+    return { dateString, displayDate: d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }), count };
+  });
+  const maxChartCount = Math.max(...chartData.map(d => d.count), 1);
+
+  // Обработка топов
+  const catMap: Record<string, number> = {};
+  topCategories?.forEach(e => { catMap[e.category] = (catMap[e.category] || 0) + 1; });
+  const sortedCategories = Object.entries(catMap).sort((a, b) => b[1] - a[1]).slice(0, 4);
+
+  const orgMap: Record<string, number> = {};
+  topOrganizers?.forEach(e => { if(e.organizer_name) orgMap[e.organizer_name] = (orgMap[e.organizer_name] || 0) + 1; });
+  const sortedOrganizers = Object.entries(orgMap).sort((a, b) => b[1] - a[1]).slice(0, 4);
+
+  const approveRate = totalApps ? Math.round((approvedApps! / totalApps) * 100) : 0;
+
+  return (
+    <div className="max-w-6xl">
+      
+      {/* Хедер с фильтрами */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 border-b-2 border-brand-line pb-4 gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold uppercase">Обзор платформы</h1>
+          <p className="text-sm font-bold text-brand-muted mt-1">Статистика и аналитика</p>
+        </div>
+        <div className="flex bg-brand-surface border-2 border-brand-line rounded-brand p-1">
+          <Link href="/admin?period=today" className={`px-3 py-1.5 text-xs font-bold rounded ${period === 'today' ? 'bg-brand-accent text-white' : 'hover:bg-brand-bg'}`}>Сегодня</Link>
+          <Link href="/admin?period=7d" className={`px-3 py-1.5 text-xs font-bold rounded ${period === '7d' ? 'bg-brand-accent text-white' : 'hover:bg-brand-bg'}`}>7 дней</Link>
+          <Link href="/admin?period=30d" className={`px-3 py-1.5 text-xs font-bold rounded ${period === '30d' ? 'bg-brand-accent text-white' : 'hover:bg-brand-bg'}`}>30 дней</Link>
+          <Link href="/admin?period=all" className={`px-3 py-1.5 text-xs font-bold rounded ${period === 'all' ? 'bg-brand-accent text-white' : 'hover:bg-brand-bg'}`}>Всё время</Link>
+        </div>
+      </div>
+
+      {/* Блок: За выбранный период */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
+        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 flex flex-col justify-between">
+          <div className="text-xs font-extrabold uppercase text-brand-muted mb-4">Регистрации</div>
+          <div className="text-4xl font-extrabold">{usersCount || 0}</div>
+        </div>
+        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 flex flex-col justify-between">
+          <div className="text-xs font-extrabold uppercase text-brand-muted mb-4">Создано событий</div>
+          <div className="text-4xl font-extrabold">{eventsCount || 0}</div>
+        </div>
+        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 flex flex-col justify-between">
+          <div className="text-xs font-extrabold uppercase text-brand-muted mb-4">Подано заявок</div>
+          <div className="text-4xl font-extrabold">{appsCount || 0}</div>
+        </div>
+      </div>
+
+      {/* График активности */}
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 mb-6">
+        <h2 className="text-xs font-extrabold uppercase text-brand-muted mb-6">Активность (создано событий за 14 дней)</h2>
+        <div className="flex items-end justify-between h-32 gap-1 sm:gap-2">
+          {chartData.map((d, i) => (
+            <div key={i} className="flex flex-col items-center flex-1 group relative">
+              <div className="absolute -top-6 bg-brand-bg border border-brand-line text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
+                {d.displayDate}: {d.count}
+              </div>
+              <div 
+                className={`w-full rounded-t-sm transition-all ${d.count > 0 ? 'bg-brand-accent hover:bg-brand-accent-ink' : 'bg-brand-bg'}`}
+                style={{ height: `${Math.max((d.count / maxChartCount) * 100, 4)}%` }}
+              ></div>
+              <span className="text-[9px] font-bold text-brand-muted mt-2 rotate-[-45deg] sm:rotate-0">{d.displayDate.split(' ')[0]}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Воронка заявок */}
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 mb-6">
+        <h2 className="text-xs font-extrabold uppercase text-brand-muted mb-4">Воронка заявок (За всё время)</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="bg-brand-bg p-4 rounded border border-brand-line">
+            <div className="text-2xl font-extrabold">{totalApps || 0}</div>
+            <div className="text-[10px] font-bold uppercase text-brand-muted mt-1">Всего подано</div>
+          </div>
+          <div className="bg-brand-bg p-4 rounded border border-brand-line">
+            <div className="text-2xl font-extrabold text-green-600">{approvedApps || 0}</div>
+            <div className="text-[10px] font-bold uppercase text-brand-muted mt-1">Подтверждено ({approveRate}%)</div>
+          </div>
+          <div className="bg-brand-bg p-4 rounded border border-brand-line">
+            <div className="text-2xl font-extrabold text-brand-accent">{pendingApps || 0}</div>
+            <div className="text-[10px] font-bold uppercase text-brand-muted mt-1">В ожидании</div>
+          </div>
+          <div className="bg-brand-bg p-4 rounded border border-brand-line">
+            <div className="text-2xl font-extrabold text-red-600">{rejectedApps || 0}</div>
+            <div className="text-[10px] font-bold uppercase text-brand-muted mt-1">Отклонено / Отменено</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Топы */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
+          <h2 className="text-xs font-extrabold uppercase text-brand-muted mb-4">Популярные категории</h2>
+          <div className="flex flex-col gap-4">
+            {sortedCategories.length === 0 && <p className="text-sm font-bold text-brand-muted">Нет данных</p>}
+            {sortedCategories.map(([cat, count]) => {
+              const percent = Math.round((count / sortedCategories[0][1]) * 100);
+              return (
+                <div key={cat}>
+                  <div className="flex justify-between text-xs font-bold mb-1"><span>{cat}</span><span>{count}</span></div>
+                  <div className="w-full bg-brand-bg rounded-full h-1.5"><div className="bg-brand-cat h-1.5 rounded-full" style={{ width: `${percent}%` }}></div></div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
+          <h2 className="text-xs font-extrabold uppercase text-brand-muted mb-4">Активные организаторы</h2>
+          <div className="flex flex-col gap-4">
+            {sortedOrganizers.length === 0 && <p className="text-sm font-bold text-brand-muted">Нет данных</p>}
+            {sortedOrganizers.map(([org, count]) => {
+              const percent = Math.round((count / sortedOrganizers[0][1]) * 100);
+              return (
+                <div key={org}>
+                  <div className="flex justify-between text-xs font-bold mb-1"><span>@{org}</span><span>{count} соб.</span></div>
+                  <div className="w-full bg-brand-bg rounded-full h-1.5"><div className="bg-brand-accent h-1.5 rounded-full" style={{ width: `${percent}%` }}></div></div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+    </div>
+  );
+}
+````
+
+### `app/admin/support/page.tsx`
+
+``tsx
+import { createClient } from '@/lib/supabase-server';
+import { requireAdmin } from '@/lib/admin-utils';
+import TicketActions from '@/components/admin/TicketActions';
+
+export default async function AdminSupportPage() {
+  await requireAdmin();
+  const supabase = await createClient();
+
+  const { data: tickets } = await supabase
+    .from('support_tickets')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  return (
+    <div className="max-w-5xl">
+      <div className="flex items-end justify-between mb-8 border-b-2 border-brand-line pb-4">
+        <div>
+          <h1 className="text-3xl font-extrabold uppercase">Обращения</h1>
+          <p className="text-sm font-bold text-brand-muted mt-1">Сообщения от пользователей</p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        {tickets?.length === 0 && <p className="text-brand-muted font-bold">Обращений пока нет.</p>}
+        
+        {tickets?.map((t) => (
+          <div key={t.id} className={`bg-brand-surface border-2 rounded-brand-lg p-5 flex flex-col gap-3 ${t.status === 'new' ? 'border-brand-accent' : 'border-brand-line opacity-70'}`}>
+            <div className="flex justify-between items-start">
+              <div>
+                <span className={`inline-block px-2 py-0.5 rounded text-[10px] uppercase font-extrabold border mb-2 ${t.status === 'new' ? 'bg-brand-accent text-white border-brand-accent' : 'bg-gray-200 text-gray-600 border-gray-300'}`}>
+                  {t.status === 'new' ? 'Новое' : 'Решено'}
+                </span>
+                <h3 className="text-lg font-extrabold">{t.subject}</h3>
+                <p className="text-sm font-bold text-brand-muted mt-1">
+                  От: <a href={`mailto:${t.email}`} className="hover:text-brand-accent underline">{t.email}</a>
+                  <span className="mx-2">•</span>
+                  {new Date(t.created_at).toLocaleString('ru-RU')}
+                </p>
+              </div>
+              <TicketActions ticketId={t.id} currentStatus={t.status} userEmail={t.email} />
+            </div>
+            
+            <div className="bg-brand-bg p-4 rounded border border-brand-line text-sm font-medium whitespace-pre-wrap">
+              {t.message}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+````
+
+### `app/admin/users/page.tsx`
+
+``tsx
+import { createClient } from '@/lib/supabase-server';
+import { requireAdmin } from '@/lib/admin-utils';
+import UserActions from '@/components/admin/UserActions';
+import Image from 'next/image';
+
+export default async function AdminUsersPage() {
+  // Проверяем, что зашел именно админ (модераторы сюда не попадут)
+  const { user, role } = await requireAdmin();
+  if (role !== 'admin') {
+    return (
+      <div className="text-center py-20">
+        <h1 className="text-2xl font-extrabold text-brand-muted">Доступ запрещен</h1>
+        <p className="text-sm font-bold mt-2">Управление пользователями доступно только администраторам.</p>
+      </div>
+    );
+  }
+
+  const supabase = await createClient();
+  
+  // Получаем всех пользователей
+  const { data: users } = await supabase
+    .from('profiles')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  return (
+    <div className="max-w-6xl">
+      <div className="flex items-end justify-between mb-8 border-b-2 border-brand-line pb-4">
+        <div>
+          <h1 className="text-3xl font-extrabold uppercase">Пользователи</h1>
+          <p className="text-sm font-bold text-brand-muted mt-1">Управление ролями и блокировками</p>
+        </div>
+        <div className="text-sm font-extrabold bg-brand-surface px-4 py-2 border-2 border-brand-line rounded-brand">
+          Всего: {users?.length || 0}
+        </div>
+      </div>
+
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b-2 border-brand-line bg-brand-bg">
+              <th className="p-4 text-xs font-extrabold uppercase text-brand-muted">Пользователь</th>
+              <th className="p-4 text-xs font-extrabold uppercase text-brand-muted">Дата рег.</th>
+              <th className="p-4 text-xs font-extrabold uppercase text-brand-muted">Роль</th>
+              <th className="p-4 text-xs font-extrabold uppercase text-brand-muted text-right">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users?.map((u) => (
+              <tr key={u.id} className={`border-b border-brand-line/50 hover:bg-brand-bg/50 transition-colors ${u.is_banned ? 'opacity-50 bg-red-50' : ''}`}>
+                <td className="p-4">
+                  <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-extrabold text-xs overflow-hidden shrink-0 border-2
+                      ${u.gender === 'male' ? 'border-blue-400 bg-blue-50' : u.gender === 'female' ? 'border-pink-400 bg-pink-50' : 'border-brand-line bg-brand-bg'}
+                    `}>
+                      {u.avatar_url ? (
+                        <Image src={u.avatar_url} alt={u.username} width={32} height={32} className="w-full h-full object-cover" />
+                      ) : (
+                        u.username.charAt(0).toUpperCase()
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm">@{u.username}</div>
+                      <div className="text-xs text-brand-muted">{u.email}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="p-4 text-sm font-bold text-brand-muted">
+                  {new Date(u.created_at).toLocaleDateString('ru-RU')}
+                </td>
+                <td className="p-4">
+                  <span className={`text-[10px] font-extrabold uppercase px-2 py-1 rounded border ${
+                    u.role === 'admin' ? 'bg-purple-100 text-purple-700 border-purple-300' :
+                    u.role === 'moderator' ? 'bg-blue-100 text-blue-700 border-blue-300' :
+                    'bg-brand-bg text-brand-muted border-brand-line'
+                  }`}>
+                    {u.role}
+                  </span>
+                </td>
+                <td className="p-4 text-right">
+                  <UserActions 
+                    userId={u.id} 
+                    currentRole={u.role || 'user'} 
+                    isBanned={u.is_banned || false} 
+                    currentAdminId={user.id}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 ````
 
 ### `app/archive/page.tsx`
@@ -916,6 +1670,44 @@ export default async function ArchivePage({
     </main>
   );
 }
+````
+
+### `app/banned/page.tsx`
+
+``tsx
+import Link from 'next/link';
+import AppealForm from '@/components/AppealForm';
+
+export default function BannedPage() {
+  return (
+    <main className="max-w-md mx-auto mt-20 px-6">
+      <div className="bg-brand-surface border-2 border-red-500 rounded-brand-lg p-8 text-center">
+        <div className="text-6xl mb-4">🍆</div>
+        <h1 className="text-2xl font-extrabold uppercase mb-4 text-red-600">
+          Аккаунт заблокирован
+        </h1>
+        <p className="text-brand-muted font-bold mb-6">
+          Ваш доступ к платформе «Намылимся» был приостановлен администрацией за нарушение правил сообщества.
+        </p>
+        <p className="text-sm font-medium text-brand-text mb-8 bg-brand-bg p-3 rounded border border-brand-line">
+          Если вы считаете, что это ошибка, напишите нам. Мы обязательно разберемся.
+        </p>
+        
+        <div className="flex flex-col gap-3">
+          <AppealForm />
+          <Link
+            href="/login"
+            className="inline-block bg-brand-bg text-brand-text font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-surface transition-colors"
+          >
+            Выйти из аккаунта
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+
 ````
 
 ### `app/error.tsx`
@@ -1051,6 +1843,17 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 
       {/* Шапка события */}
       <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 md:p-8 mb-6 relative">
+                {event.status === 'cancelled' && (
+          <div className="mb-4 bg-red-100 border-2 border-red-300 text-red-800 p-4 rounded-brand font-bold flex items-center gap-3">
+            <span className="text-2xl">🚫</span>
+            <div>
+              <p className="uppercase text-sm">Это событие отменено организатором</p>
+              {event.cancel_reason && (
+                <p className="text-xs font-medium mt-1">Причина: {event.cancel_reason}</p>
+              )}
+            </div>
+          </div>
+        )}
         <div className="flex flex-col md:flex-row justify-between gap-6">
           
           <div className="flex-1">
@@ -1116,11 +1919,11 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
-          {isOrganizer && (
-            <div className="mt-4 pt-4 border-t-2 border-dashed border-brand-line">
-              <EventAdminActions eventId={event.id} eventTitle={event.title} />
-            </div>
-          )}
+{isOrganizer && event.status !== 'cancelled' && (
+  <div className="mb-4 mt-4 pt-4 border-t-2 border-dashed border-brand-line">
+    <EventAdminActions eventId={event.id} eventTitle={event.title} />
+  </div>
+)}
 
           {myAppStatus === 'approved' && (
           <div className="mt-4">
@@ -1408,6 +2211,7 @@ export default function ForgotPasswordPage() {
   
   --radius-brand: 4px;
   --radius-brand-lg: 8px;
+  --radius-brand-99: 99px;
 }
 
 @layer base {
@@ -1551,6 +2355,7 @@ import "./globals.css";
 import Header from "@/components/Header";
 import PageTransition from "@/components/PageTransition";
 import { ToastProvider } from "@/components/Toast";
+import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: "Намылимся. — Лента",
@@ -1589,10 +2394,13 @@ export default function RootLayout({
           {children}
         </PageTransition>
 
-        <footer className="max-w-[1200px] w-full mx-auto mt-auto px-6 py-5 text-brand-muted text-[13px] border-t-2 border-brand-line">
-          <p>«Намылимся.» — площадка для живых встреч. Ответственность за проведение событий лежат на организаторах и участниках.</p>
-          <p>16+ · Правила сообщества · Поддержка</p>
+          <footer className="max-w-[1200px] w-full mx-auto mt-auto px-6 py-5 text-brand-muted text-[13px] border-t-2 border-brand-line flex justify-between items-center">
+          <div>
+            <p>«Намылимся.» — площадка для живых встреч. Ответственность за проведение событий лежат на организаторах и участниках.</p>
+            <p>16+ · Правила сообщества · <Link href="/support" className="hover:text-brand-accent transition-colors">Написать в поддержку</Link></p>
+          </div>
         </footer>
+
         </ToastProvider>
       </body>
     </html>
@@ -1887,6 +2695,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import ApplicationActions from '@/components/ApplicationActions';
 import { getUnreadCounts } from '@/app/actions';
+import Image from 'next/image'; // <--- ДОБАВЛЕН ИМПОРТ
 
 // Явно описываем типы для TypeScript
 type EventType = {
@@ -1895,6 +2704,8 @@ type EventType = {
   date_time: string;
   organizer_name: string;
   max_participants: number;
+  status: string;           // <--- ДОБАВЛЕНО
+  cancel_reason?: string;   // <--- ДОБАВЛЕНО
 };
 
 type ApplicationType = {
@@ -1902,7 +2713,7 @@ type ApplicationType = {
   status: string;
   event_id: string;
   user_id: string;
-  profile?: { username: string } | null;
+  profiles?: { username: string } | { username: string }[] | null; // <--- ИСПРАВЛЕНО на profiles
 };
 
 export default async function MyEventsPage() {
@@ -1914,7 +2725,7 @@ export default async function MyEventsPage() {
   // 1. Получаем события пользователя
   const { data: events } = await supabase
     .from('events')
-    .select('id, title, date_time, organizer_name, max_participants')
+    .select('id, title, date_time, organizer_name, max_participants, status, cancel_reason') // <--- ДОБАВЛЕНО status и cancel_reason
     .eq('organizer_id', user.id)
     .order('date_time', { ascending: true }) as { data: EventType[] | null };
 
@@ -1939,10 +2750,10 @@ export default async function MyEventsPage() {
       .select('id, username')
       .in('id', userIds) as { data: { id: string, username: string }[] | null };
 
-    // Сшиваем заявки с профилями
+    // Сшиваем заявки с профилями (переименовываем в profiles)
     applicationsWithProfiles = applications.map(app => ({
       ...app,
-      profile: profiles?.find(p => p.id === app.user_id)
+      profiles: profiles?.find(p => p.id === app.user_id) || null
     }));
   }
 
@@ -1953,7 +2764,15 @@ export default async function MyEventsPage() {
       id,
       status,
       created_at,
-      events!fk_applications_event ( id, title, date_time, organizer_name )
+      events!fk_applications_event ( 
+        id, 
+        title, 
+        date_time, 
+        organizer_name,
+        status,
+        cancel_reason,
+        profiles!events_organizer_profile_fkey ( username, avatar_url, gender )
+      )
     `)
     .eq('user_id', user.id)
     .order('created_at', { ascending: false }) as { data: any[] | null };
@@ -1993,9 +2812,9 @@ export default async function MyEventsPage() {
             const unread = unreadCounts[event.id] || 0;
 
             return (
-              <div key={event.id} className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5 md:p-6 relative">
+              <div key={event.id} className={`relative bg-brand-surface border-2 rounded-brand-lg p-5 md:p-6 ${event.status === 'cancelled' ? 'border-red-300 opacity-80' : 'border-brand-line'}`}>
                 
-                {unread > 0 && (
+                {unread > 0 && event.status !== 'cancelled' && (
                   <div className="absolute top-5 right-5 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse shadow-md">
                     В чате {unread} новых
                   </div>
@@ -2003,32 +2822,54 @@ export default async function MyEventsPage() {
 
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
                   <div>
-                    <h2 className="text-2xl font-extrabold mb-2 pr-24">{event.title}</h2>
+                    {event.status === 'cancelled' && (
+                      <div className="mb-2 inline-block bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] uppercase font-extrabold border border-red-300">
+                        Отменено
+                      </div>
+                    )}
+                    
+           
+
+                    <h2 className={`text-2xl font-extrabold mb-2 pr-24 ${event.status === 'cancelled' ? 'line-through text-brand-muted' : ''}`}>
+                      {event.title}
+                    </h2>
                     <p className="text-brand-muted font-bold text-sm">
                       {new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })} в {new Date(event.date_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                     </p>
+
+                    <div className="mt-2 text-[11px] font-bold text-brand-cat bg-brand-cat-soft inline-flex items-center gap-1 px-2 py-1 rounded border border-brand-cat/20">
+                      <span>👤</span> Лимит: {event.max_participants} чел.
+                    </div>
+
+
                   </div>
-                  <Link 
-                    href={`/event/${event.id}`} 
-                    className="bg-brand-bg text-brand-text font-extrabold text-[12px] uppercase px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-cat-soft transition-colors w-fit whitespace-nowrap"
-                  >
-                    Перейти к событию →
-                  </Link>
+                  
+                  <div className="flex flex-col sm:items-end gap-2">
+                    <Link 
+                      href={`/event/${event.id}`} 
+                      className="bg-brand-bg text-brand-text font-extrabold text-[12px] uppercase px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-cat-soft transition-colors w-fit whitespace-nowrap"
+                    >
+                      Перейти к событию →
+                    </Link>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 border-t-2 border-dashed border-brand-line pt-6">
                   <div>
                     <h3 className="font-extrabold uppercase mb-3 text-brand-accent text-sm">Новые заявки ({pendingApps.length})</h3>
                     {pendingApps.length === 0 ? (
-                      <p className="text-sm text-brand-muted font-bold">Новых заявок нет.</p>
+                      <p className="text-sm text-brand-muted font-bold bg-brand-bg/50 p-3 rounded border border-brand-line/50">Новых заявок нет.</p>
                     ) : (
                       <ul className="flex flex-col gap-3">
-                        {pendingApps.map((app) => (
-                          <li key={app.id} className="flex items-center justify-between bg-brand-bg p-2 rounded-brand border border-brand-line">
-                            <span className="font-bold text-sm truncate mr-2">@{app.profile?.username || 'Пользователь'}</span>
-                            <ApplicationActions applicationId={app.id} />
-                          </li>
-                        ))}
+                        {pendingApps.map((app) => {
+                          const profile = Array.isArray(app.profiles) ? app.profiles[0] : app.profiles;
+                          return (
+                            <li key={app.id} className="flex items-center justify-between bg-brand-bg p-2 rounded-brand border border-brand-line">
+                              <span className="font-bold text-sm truncate mr-2">@{profile?.username || 'Пользователь'}</span>
+                              <ApplicationActions applicationId={app.id} />
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
                   </div>
@@ -2036,14 +2877,18 @@ export default async function MyEventsPage() {
                   <div>
                     <h3 className="font-extrabold uppercase mb-3 text-green-600 text-sm">Подтверждены ({approvedApps.length})</h3>
                     {approvedApps.length === 0 ? (
-                      <p className="text-sm text-brand-muted font-bold">Пока никого нет.</p>
+                      <p className="text-sm text-brand-muted font-bold bg-brand-bg/50 p-3 rounded border border-brand-line/50">Пока никого нет.</p>
                     ) : (
                       <ul className="flex flex-col gap-2">
-                        {approvedApps.map((app) => (
-                          <li key={app.id} className="bg-brand-bg p-2 rounded-brand border border-brand-line text-sm font-bold truncate">
-                            @{app.profile?.username || 'Пользователь'}
-                          </li>
-                        ))}
+                        {approvedApps.map((app) => {
+                          const profile = Array.isArray(app.profiles) ? app.profiles[0] : app.profiles;
+                          return (
+                            <li key={app.id} className="bg-brand-bg p-2 rounded-brand border border-brand-line text-sm font-bold truncate flex justify-between">
+                              <span>@{profile?.username || 'Пользователь'}</span>
+                              <span className="text-green-600">✓</span>
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
                   </div>
@@ -2071,6 +2916,12 @@ export default async function MyEventsPage() {
               if (!event) return null;
 
               const unread = unreadCounts[event.id] || 0;
+              const isEventCancelled = event.status === 'cancelled';
+
+              const organizer = Array.isArray(event.profiles) ? event.profiles[0] : event.profiles;
+              const orgAvatar = organizer?.avatar_url;
+              const orgName = organizer?.username || event.organizer_name;
+              const orgGender = organizer?.gender;
 
               let statusText = 'Ожидает подтверждения';
               let statusColor = 'text-brand-accent border-brand-accent bg-brand-accent/10';
@@ -2083,27 +2934,59 @@ export default async function MyEventsPage() {
                 statusColor = 'text-red-600 border-red-600 bg-red-100';
               }
 
+              if (isEventCancelled) {
+                statusText = 'Событие отменено';
+                statusColor = 'text-red-700 border-red-700 bg-red-100';
+              }
+
               return (
-                <div key={app.id} className="relative bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5 flex flex-col gap-4">
+                <div key={app.id} className={`relative bg-brand-surface border-2 rounded-brand-lg p-5 flex flex-col gap-4 ${isEventCancelled ? 'border-red-300 opacity-80' : 'border-brand-line'}`}>
                   
-                  {unread > 0 && (
+                  {unread > 0 && !isEventCancelled && (
                     <div className="absolute top-4 right-4 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full animate-pulse">
                       В чате {unread}
                     </div>
                   )}
 
+                  
+
                   <div>
-                    <span className={`inline-block px-3 py-1 text-xs font-extrabold uppercase rounded border-2 mb-3 ${statusColor}`}>
-                      {statusText}
-                    </span>
-                    <h3 className="text-xl font-extrabold mb-1 pr-16">{event.title}</h3>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      <span className={`inline-block px-3 py-1 text-xs font-extrabold uppercase rounded border-2 ${statusColor}`}>
+                        {statusText}
+                      </span>
+                    </div>
+
+
+                    
+                    <h3 className={`text-xl font-extrabold mb-1 pr-16 ${isEventCancelled ? 'line-through text-brand-muted' : ''}`}>
+                      {event.title}
+                    </h3>
                     <p className="text-brand-muted font-bold text-sm">
                       {new Date(event.date_time).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })} в {new Date(event.date_time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                     </p>
+
+
                   </div>
                   
                   <div className="mt-auto pt-4 border-t-2 border-dashed border-brand-line flex justify-between items-center">
-                    <span className="text-sm text-brand-muted font-bold">Орг: {event.organizer_name}</span>
+                    <Link href={`/@${orgName}`} className="flex items-center gap-2 group">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-extrabold flex-shrink-0 overflow-hidden border-2
+                        ${orgGender === 'male' ? 'bg-blue-100 text-blue-800 border-blue-400' : 
+                          orgGender === 'female' ? 'bg-pink-100 text-pink-800 border-pink-400' : 
+                          'bg-gray-200 text-gray-700 border-brand-line'}
+                      `}>
+                        {orgAvatar ? (
+                          <Image src={orgAvatar} alt={orgName} width={32} height={32} className="w-full h-full object-cover" />
+                        ) : (
+                          orgName.charAt(0).toUpperCase()
+                        )}
+                      </div>
+                      <span className="text-sm font-bold text-brand-text group-hover:text-brand-accent transition-colors">
+                        @{orgName}
+                      </span>
+                    </Link>
+
                     <Link href={`/event/${event.id}`} className="text-brand-accent font-extrabold text-sm uppercase hover:underline">
                       Перейти →
                     </Link>
@@ -2294,6 +3177,309 @@ export default function ResetPasswordPage() {
             className="mt-2 bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors disabled:opacity-50"
           >
             {loading ? 'Сохранение...' : 'Сохранить пароль'}
+          </button>
+        </form>
+      </div>
+    </main>
+  );
+}
+````
+
+### `app/settings/page.tsx`
+
+``tsx
+'use client';
+
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/components/Toast';
+import { useRouter } from 'next/navigation';
+
+const INTERESTS_LIST = [
+  'Спорт', 'Кино', 'Музыка', 'Игры', 'Книги', 'Фотография', 'Кулинария', 'Путешествия', 
+  'Искусство', 'IT и технологии', 'Животные', 'Психология', 'Бизнес', 'Танцы', 'Театр', 
+  'Йога', 'Настолки', 'Автомобили', 'Мода', 'Наука'
+];
+
+export default function SettingsPage() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+const [profile, setProfile] = useState<{ id: string; username: string } | null>(null);
+  const { showSuccess, showError } = useToast();
+  const router = useRouter();
+
+  // Стейты полей
+  const [age, setAge] = useState('');
+  const [gender, setGender] = useState('none');
+  const [bio, setBio] = useState('');
+  const [telegram, setTelegram] = useState('');
+  const [vk, setVk] = useState('');
+  const [interests, setInterests] = useState<string[]>([]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+      supabase.from('profiles').select('*').eq('id', user.id).single().then(({ data }) => {
+        if (data) {
+          setProfile(data);
+          setAge(data.age?.toString() || '');
+          setGender(data.gender || 'none');
+          setBio(data.bio || '');
+          setTelegram(data.telegram || '');
+          setVk(data.vk || '');
+          setInterests(data.interests || []);
+        }
+        setLoading(false);
+      });
+    });
+  }, [router]);
+
+  const toggleInterest = (interest: string) => {
+    if (interests.includes(interest)) {
+      setInterests(interests.filter(i => i !== interest));
+    } else {
+      if (interests.length >= 5) {
+        showError('Можно выбрать не более 5 увлечений');
+        return;
+      }
+      setInterests([...interests, interest]);
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile) return; // <--- Проверка на null
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('profiles').update({
+        age: age ? parseInt(age) : null,
+        gender,
+        bio: bio.trim() || null,
+        telegram: telegram.trim() || null,
+        vk: vk.trim() || null,
+        interests: interests.length > 0 ? interests : null
+      }).eq('id', profile.id);
+
+      if (error) throw error;
+      showSuccess('Профиль успешно обновлен!');
+      router.push(`/@${profile.username}`);
+    } catch {
+      showError('Ошибка сохранения профиля');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <div className="text-center py-20 font-bold">Загрузка...</div>;
+
+  return (
+    <main className="max-w-2xl mx-auto px-4 py-10">
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 md:p-8">
+        <h1 className="text-2xl font-extrabold uppercase mb-6 border-b-2 border-brand-line pb-4">
+          Настройки профиля
+        </h1>
+
+        <form onSubmit={handleSave} className="flex flex-col gap-6">
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-extrabold uppercase text-brand-muted">Возраст (полных лет)</label>
+              <input type="number" value={age} onChange={e => setAge(e.target.value)} min="14" max="99" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" />
+            </div>
+            
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-extrabold uppercase text-brand-muted">Пол</label>
+              <select value={gender} onChange={e => setGender(e.target.value)} className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent">
+                <option value="male">Мужской</option>
+                <option value="female">Женский</option>
+                <option value="none">Не указывать</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">О себе</label>
+            <textarea value={bio} onChange={e => setBio(e.target.value)} rows={4} maxLength={500} placeholder="Расскажите о себе, чем занимаетесь, что ищете..." className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent resize-none" />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted flex justify-between">
+              <span>Увлечения</span>
+              <span className="text-brand-accent">Выбрано: {interests.length}/5</span>
+            </label>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {INTERESTS_LIST.map(interest => (
+                <button
+                  type="button"
+                  key={interest}
+                  onClick={() => toggleInterest(interest)}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-full border-2 transition-colors ${
+                    interests.includes(interest) 
+                      ? 'bg-brand-accent text-white border-brand-accent' 
+                      : 'bg-brand-bg text-brand-text border-brand-line hover:border-brand-accent'
+                  }`}
+                >
+                  {interest}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t-2 border-dashed border-brand-line pt-6">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-extrabold uppercase text-brand-muted">Telegram (без @)</label>
+              <input type="text" value={telegram} onChange={e => setTelegram(e.target.value)} placeholder="username" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-extrabold uppercase text-brand-muted">ВКонтакте (ID)</label>
+              <input type="text" value={vk} onChange={e => setVk(e.target.value)} placeholder="id123456" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" />
+            </div>
+          </div>
+
+          <div className="flex gap-4 mt-4">
+            <button type="button" onClick={() => router.back()} className="flex-1 bg-brand-bg text-brand-text font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-surface transition-colors">
+              Отмена
+            </button>
+            <button type="submit" disabled={saving} className="flex-1 bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors disabled:opacity-50">
+              {saving ? 'Сохранение...' : 'Сохранить'}
+            </button>
+          </div>
+        </form>
+
+      </div>
+    </main>
+  );
+}
+````
+
+### `app/support/page.tsx`
+
+``tsx
+'use client';
+
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/components/Toast';
+import Link from 'next/link';
+
+export default function SupportPage() {
+  const [email, setEmail] = useState('');
+  const [subject, setSubject] = useState('Оспорить блокировку');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const { showError } = useToast();
+
+  // Если пользователь авторизован, подтягиваем его email
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user?.email) {
+        setEmail(user.email);
+      }
+    });
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (message.length < 10) {
+      showError('Сообщение должно быть не короче 10 символов');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase.from('support_tickets').insert({
+        email,
+        subject,
+        message,
+      });
+
+      if (error) throw error;
+      
+      setSuccess(true);
+      setMessage('');
+    } catch (error) {
+      console.error(error);
+      showError('Не удалось отправить обращение. Попробуйте позже.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (success) {
+    return (
+      <main className="max-w-md mx-auto mt-20 px-6">
+        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8 text-center">
+          <div className="text-5xl mb-4">✉️</div>
+          <h1 className="text-2xl font-extrabold uppercase mb-4">Обращение отправлено!</h1>
+          <p className="text-brand-muted font-bold mb-6">
+            Мы получили ваше сообщение и ответим на него по указанному email в ближайшее время.
+          </p>
+          <Link href="/" className="inline-block bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors">
+            Вернуться на главную
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="max-w-md mx-auto mt-20 px-6 mb-20">
+      <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8">
+        <h1 className="text-2xl font-extrabold uppercase mb-2 text-center">Поддержка</h1>
+        <p className="text-sm text-brand-muted font-bold text-center mb-6">
+          Опишите вашу проблему или предложение, и мы свяжемся с вами.
+        </p>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш Email</label>
+            <input 
+              type="email" 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              required
+              placeholder="your@email.com"
+              className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors" 
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Тема обращения</label>
+            <select 
+              value={subject} 
+              onChange={(e) => setSubject(e.target.value)}
+              className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors"
+            >
+              <option value="Оспорить блокировку">Оспорить блокировку</option>
+              <option value="Пожаловаться на нарушение">Пожаловаться на нарушение</option>
+              <option value="Предложение по улучшению">Предложение по улучшению сервиса</option>
+              <option value="Другое">Другое</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Сообщение</label>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Подробно опишите вашу ситуацию..."
+              rows={5}
+              required
+              className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors resize-none"
+            />
+          </div>
+
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="mt-2 bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Отправка...' : 'Отправить обращение'}
           </button>
         </form>
       </div>
@@ -2495,6 +3681,402 @@ Write-Host "   Files: $($allFiles.Count)"
 Write-Host "   Size:  $sizeKb KB"
 ````
 
+### `components/admin/AdminEventActions.tsx`
+
+``tsx
+'use client';
+
+import { useState } from 'react';
+import { adminDeleteEvent } from '@/app/actions';
+import { useToast } from '@/components/Toast';
+import { useRouter } from 'next/navigation';
+
+export default function AdminEventActions({ eventId }: { eventId: string }) {
+  const [loading, setLoading] = useState(false);
+  const { showSuccess, showError } = useToast();
+  const router = useRouter();
+
+  const handleDelete = async () => {
+    if (!confirm('ВНИМАНИЕ! Вы уверены, что хотите НАВСЕГДА удалить это событие? Все заявки и сообщения в чате также будут удалены.')) return;
+
+    setLoading(true);
+    try {
+      const res = await adminDeleteEvent(eventId);
+      if (res?.error) showError(res.error);
+      else {
+        showSuccess('Событие удалено');
+        router.refresh();
+      }
+    } catch (error) {
+      showError('Ошибка сети');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleDelete}
+      disabled={loading}
+      className="text-xs font-bold px-3 py-1.5 bg-red-100 text-red-700 border-2 border-red-300 rounded-brand hover:bg-red-200 transition-colors disabled:opacity-50"
+    >
+      {loading ? 'Удаление...' : 'Удалить'}
+    </button>
+  );
+}
+````
+
+### `components/admin/TicketActions.tsx`
+
+``tsx
+'use client';
+
+import { useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import { useRouter } from 'next/navigation';
+import { useToast } from '@/components/Toast';
+
+export default function TicketActions({ ticketId, currentStatus, userEmail }: { ticketId: string, currentStatus: string, userEmail: string }) {
+  const [loading, setLoading] = useState(false);
+  const [banLoading, setBanLoading] = useState(false);
+  const { showSuccess, showError } = useToast();
+  const router = useRouter();
+
+  // 1. Смена статуса тикета
+  const toggleStatus = async () => {
+    setLoading(true);
+    const newStatus = currentStatus === 'new' ? 'resolved' : 'new';
+    const { error } = await supabase.from('support_tickets').update({ status: newStatus }).eq('id', ticketId);
+    
+    if (error) showError('Ошибка обновления');
+    else {
+      showSuccess(newStatus === 'resolved' ? 'Отмечено как решенное' : 'Возвращено в новые');
+      router.refresh();
+    }
+    setLoading(false);
+  };
+
+  // 2. Разбан пользователя по email
+  const handleUnban = async () => {
+    if (!confirm(`Попытаться разбанить пользователя с email ${userEmail}?`)) return;
+    
+    setBanLoading(true);
+    try {
+      // Ищем пользователя по email в профиле
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', userEmail)
+        .single();
+
+      if (!profile) {
+        showError('Пользователь с таким email не найден');
+        return;
+      }
+
+      // Снимаем бан
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_banned: false })
+        .eq('id', profile.id);
+
+      if (error) throw error;
+      
+      showSuccess('Пользователь успешно разбанен!');
+      router.refresh();
+    } catch {
+      showError('Ошибка при разбане');
+    } finally {
+      setBanLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex gap-2">
+      <button 
+        onClick={toggleStatus} 
+        disabled={loading} 
+        className={`text-xs font-bold px-3 py-1.5 border-2 rounded-brand transition-colors ${
+          currentStatus === 'new' ? 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200' : 'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200'
+        }`}
+      >
+        {loading ? '...' : currentStatus === 'new' ? 'Отметить решенным' : 'Вернуть в новые'}
+      </button>
+      
+      {/* Кнопка разбана (показываем только если статус тикета - 'new') */}
+      {currentStatus === 'new' && (
+        <button 
+          onClick={handleUnban} 
+          disabled={banLoading} 
+          className="text-xs font-bold px-3 py-1.5 bg-brand-surface text-brand-text border-2 border-brand-line rounded-brand hover:bg-brand-bg transition-colors"
+        >
+          {banLoading ? '...' : 'Разбанить'}
+        </button>
+      )}
+    </div>
+  );
+}
+````
+
+### `components/admin/UserActions.tsx`
+
+``tsx
+'use client';
+
+import { useState } from 'react';
+import { updateUserRole, toggleUserBan } from '@/app/actions';
+import { useToast } from '@/components/Toast';
+import { useRouter } from 'next/navigation';
+
+export default function UserActions({ 
+  userId, 
+  currentRole, 
+  isBanned,
+  currentAdminId
+}: { 
+  userId: string; 
+  currentRole: string; 
+  isBanned: boolean;
+  currentAdminId: string;
+}) {
+  const [loading, setLoading] = useState(false);
+  const { showSuccess, showError } = useToast();
+  const router = useRouter();
+
+  // Если это сам админ — не даем ему менять себя
+  const isSelf = userId === currentAdminId;
+
+  const handleRoleChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newRole = e.target.value as 'user' | 'moderator' | 'admin';
+    if (newRole === currentRole) return;
+
+    if (!confirm(`Вы уверены, что хотите назначить роль "${newRole}"?`)) {
+      e.target.value = currentRole; // Откатываем визуально
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await updateUserRole(userId, newRole);
+      if (res?.error) {
+        showError(res.error);
+        e.target.value = currentRole;
+      } else {
+        showSuccess('Роль успешно изменена');
+        router.refresh();
+      }
+    } catch (error) {
+      showError('Ошибка сети');
+      e.target.value = currentRole;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBanToggle = async () => {
+    const action = isBanned ? 'разбанить' : 'забанить';
+    if (!confirm(`Вы уверены, что хотите ${action} пользователя?`)) return;
+
+    setLoading(true);
+    try {
+      const res = await toggleUserBan(userId, !isBanned);
+      if (res?.error) showError(res.error);
+      else {
+        showSuccess(`Пользователь ${isBanned ? 'разбанен' : 'забанен'}`);
+        router.refresh();
+      }
+    } catch (error) {
+      showError('Ошибка сети');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (isSelf) {
+    return <span className="text-xs font-bold text-brand-muted">Это вы</span>;
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <select 
+        value={currentRole} 
+        onChange={handleRoleChange}
+        disabled={loading}
+        className="bg-brand-bg border-2 border-brand-line rounded-brand p-1 text-xs font-bold outline-none focus:border-brand-accent"
+      >
+        <option value="user">Пользователь</option>
+        <option value="moderator">Модератор</option>
+        <option value="admin">Админ</option>
+      </select>
+
+      <button
+        onClick={handleBanToggle}
+        disabled={loading}
+        className={`text-xs font-bold px-3 py-1.5 border-2 rounded-brand transition-colors ${
+          isBanned 
+            ? 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200' 
+            : 'bg-red-100 text-red-700 border-red-300 hover:bg-red-200'
+        }`}
+      >
+        {isBanned ? 'Разбанить' : 'Забанить'}
+      </button>
+    </div>
+  );
+}
+````
+
+### `components/AppealForm.tsx`
+
+``tsx
+'use client';
+
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
+import { useToast } from './Toast';
+
+export default function AppealForm() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [alreadySent, setAlreadySent] = useState(false);
+  const { showSuccess, showError } = useToast();
+
+  // При открытии модалки проверяем, есть ли уже обращение от этого юзера
+  useEffect(() => {
+    if (isOpen) {
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user?.email) setEmail(user.email);
+        
+        // Проверяем, есть ли уже НЕрешенное обращение по этому email
+        supabase
+          .from('support_tickets')
+          .select('id')
+          .eq('email', user?.email || email)
+          .eq('status', 'new')
+          .maybeSingle()
+          .then(({ data }) => {
+            if (data) setAlreadySent(true);
+          });
+      });
+    }
+  }, [isOpen, email]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (message.length < 10) {
+      showError('Сообщение должно быть не короче 10 символов');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Проверка перед вставкой (на случай, если кто-то вздумает обойти UI)
+      const { data: existing } = await supabase
+        .from('support_tickets')
+        .select('id')
+        .eq('email', email)
+        .eq('status', 'new')
+        .maybeSingle();
+
+      if (existing) {
+        throw new Error('Вы уже отправили обращение. Пожалуйста, дождитесь ответа.');
+      }
+
+      const { error } = await supabase.from('support_tickets').insert({
+        user_id: user?.id || null,
+        email: email,
+        subject: 'Оспорить блокировку',
+        message: message,
+      });
+
+      if (error) throw error;
+      
+      showSuccess('Обращение отправлено! Мы свяжемся с вами.');
+      setIsOpen(false);
+      setAlreadySent(true);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Ошибка отправки');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setIsOpen(true)}
+        className="w-full bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors"
+      >
+        Оспорить блокировку
+      </button>
+
+      {isOpen && (
+        <div className="fixed inset-0 `z-100` flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => !loading && setIsOpen(false)}></div>
+          
+          <div className="relative bg-brand-bg border-2 border-brand-line rounded-brand-lg p-6 max-w-md w-full text-left">
+            <h2 className="text-xl font-extrabold uppercase mb-2">Оспорить блокировку</h2>
+            
+            {alreadySent ? (
+              <div className="bg-green-100 text-green-800 p-4 rounded border-2 border-green-300 font-bold text-sm">
+                Вы уже отправили обращение. Пожалуйста, дождитесь ответа администрации.
+              </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш Email (для ответа)</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    readOnly={!!email}
+                    className="p-2.5 bg-brand-surface border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[12px] font-extrabold uppercase text-brand-muted">Объясните ситуацию</label>
+                  <textarea
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    placeholder="Опишите, почему вы считаете блокировку ошибкой..."
+                    rows={4}
+                    required
+                    className="p-2.5 bg-brand-surface border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent transition-colors resize-none"
+                  />
+                </div>
+
+                <div className="flex gap-3 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsOpen(false)}
+                    disabled={loading}
+                    className="flex-1 bg-brand-surface text-brand-text font-extrabold text-sm uppercase px-4 py-3 border-2 border-brand-line rounded-brand hover:bg-brand-bg transition-colors disabled:opacity-50"
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex-1 bg-brand-accent text-brand-accent-ink font-extrabold text-sm uppercase px-4 py-3 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors disabled:opacity-50"
+                  >
+                    {loading ? 'Отправка...' : 'Отправить'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+````
+
 ### `components/ApplicationActions.tsx`
 
 ``tsx
@@ -2587,7 +4169,7 @@ export default function AvatarPicker({ currentAvatar, gender, username, userId }
   const folder = gender === 'male' ? 'male' : gender === 'female' ? 'female' : 'none';
   
   // Генерируем массив путей к картинкам (от 1 до 30)
-  const avatars = Array.from({ length: 30 }, (_, i) => `/avatars/${folder}/${i + 1}.png`);
+  const avatars = Array.from({ length: 8 }, (_, i) => `/avatars/${folder}/${i + 1}.png`);
 
   const handleSelectAvatar = async (avatarUrl: string) => {
     setIsSaving(true);
@@ -2815,7 +4397,7 @@ export default function CancelParticipationButton({ eventId, eventTitle }: { eve
         setIsModalOpen(false);
         router.refresh();
       }
-    } catch (error) {
+    } catch {
       showError('Произошла ошибка');
     } finally {
       setLoading(false);
@@ -3049,7 +4631,7 @@ export default function CreateEventForm() {
       showSuccess('Событие успешно создано!');
       formRef.current?.closest('details')?.removeAttribute('open');
       router.refresh();
-    } catch (error) {
+    } catch{
       // Если произошло что-то совсем непредвиденное
       showError('Произошла непредвиденная ошибка');
     } finally {
@@ -3209,7 +4791,7 @@ export default function EventAdminActions({ eventId, eventTitle }: { eventId: st
         showSuccess('Событие отменено. Участники уведомлены.');
         router.push('/my-events');
       }
-    } catch (error) {
+    } catch{
       showError('Произошла ошибка');
     } finally {
       setLoading(false);
@@ -3252,6 +4834,7 @@ import { applyToEvent, cancelApplication } from '@/app/actions';
 import type { User } from '@supabase/supabase-js';
 import ClientMapWrapper from './ClientMapWrapper';
 import { useToast } from './Toast';
+import { getBadgeStatus, ORGANIZER_BADGES } from '@/lib/achievements';
 
 export default function EventCard({ item }: { item: EventListItemDTO }) {
   const {
@@ -3276,6 +4859,8 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
     organizerAvatar,
     organizerGender,
     city,
+    status,
+    cancelReason,
   } = item;
 
   const { showSuccess, showError } = useToast();
@@ -3366,7 +4951,7 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
   });
 
   return (
-    <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg flex flex-col sm:flex-row overflow-hidden hover:opacity-95 transition-opacity w-full relative">
+    <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg flex flex-col sm:flex-row overflow-hidden hover:opacity-95 transition-opacity w-full relative h-full">
       
       {/* ЛЕВАЯ КОЛОНКА (Дата, Время, Места) */}
       <div className="bg-brand-bg/50 p-3 sm:p-4 sm:w-[140px] flex-shrink-0 flex flex-row sm:flex-col items-center sm:items-start border-b-2 sm:border-b-0 sm:border-r-2 border-brand-line justify-between sm:justify-center">
@@ -3398,13 +4983,25 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
       <div className="p-4 sm:p-5 md:p-6 flex-grow flex flex-col min-w-0">
         
         {/* Категория над заголовком */}
-        <div className="mb-2">
-          <span className="text-[9px] sm:text-[10px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-0.5 rounded border border-brand-cat/30 inline-block">
+  {/* Категория и Статус над заголовком */}
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-0.5 rounded border border-brand-cat/30 inline-block">
             {category}
           </span>
+          
+          {status === 'cancelled' && (
+            <span className="text-[10px] uppercase font-extrabold bg-red-100 text-red-700 px-2 py-0.5 rounded border border-red-300 inline-block">
+              Отменено
+            </span>
+          )}
         </div>
 
-        {/* Заголовок */}
+        {/* Блок причины отмены (если есть) */}
+        {status === 'cancelled' && cancelReason && (
+          <div className="mb-3 p-2 bg-red-50 text-red-800 border border-red-200 rounded text-xs font-bold">
+            Причина отмены: {cancelReason}
+          </div>
+        )}
         <Link
           href={`/event/${id}`}
           className="block hover:text-brand-accent transition-colors pr-12"
@@ -3448,14 +5045,14 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
         <div className="flex flex-wrap items-center justify-between gap-3 mt-auto pt-2">
           
           <div className="flex items-center gap-2 text-sm">
-            <div
-              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-brand-line flex items-center justify-center text-[10px] font-extrabold flex-shrink-0 overflow-hidden
+                        <div
+              className={`w-12 h-12 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-[10px] font-extrabold flex-shrink-0 overflow-hidden border-2
                 ${
                   organizerGender === 'male'
-                    ? 'bg-blue-100 text-blue-800'
+                    ? 'bg-blue-100 text-blue-800 border-blue-600'
                     : organizerGender === 'female'
-                    ? 'bg-pink-100 text-pink-800'
-                    : 'bg-gray-200 text-gray-700'
+                    ? 'bg-pink-100 text-pink-800 border-pink-600'
+                    : 'bg-gray-200 text-gray-700 border-brand-line'
                 }
               `}
             >
@@ -3463,9 +5060,9 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
                 <Image
                   src={organizerAvatar}
                   alt={organizerName}
-                  width={24}
-                  height={24}
-                  className="w-4 h-4 sm:w-5 sm:h-5 object-contain"
+                  width={90}
+                  height={90}
+                  className="w-full h-full sm:w-8 sm:h-8 object-contain"
                 />
               ) : (
                 organizerName.charAt(0)
@@ -3486,13 +5083,24 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
           </div>
 
           <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-             {!isPast && (
+               {!isPast && (
               <button
                 onClick={handleApply}
                 disabled={buttonDisabled}
-                className={`flex-1 sm:flex-none font-extrabold text-[11px] sm:text-[13px] uppercase px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-brand-line rounded-brand transition-colors ${buttonClass}`}
+                className={`flex-1 sm:flex-none font-extrabold text-[11px] sm:text-[13px] uppercase px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-brand-line rounded-brand transition-colors flex items-center justify-center gap-2 ${buttonClass}`}
               >
-                {buttonText}
+                {/* Если идет загрузка, показываем спиннер */}
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Отправка...</span>
+                  </>
+                ) : (
+                  buttonText
+                )}
               </button>
             )}
 
@@ -3839,14 +5447,18 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
               <div key={msg.id} className={`group flex gap-2 max-w-[85%] ${isMine ? 'self-end flex-row-reverse' : 'self-start'}`}>
                 
                 {/* Аватарка (картинка или буква) */}
-                <div className={`w-8 h-8 flex-shrink-0 rounded-full border border-brand-line/20 flex items-center justify-center text-xs font-extrabold overflow-hidden mt-auto mb-1 ${!avatarUrl ? bgClass : 'bg-brand-bg'}`}>
+                 <div className={`w-12 h-12 flex-shrink-0 rounded-full flex items-center justify-center text-xs font-extrabold overflow-hidden mt-auto mb-1 border-2
+                  ${avatarUrl ? 'bg-brand-bg' : ''} 
+                  ${gender === 'male' ? 'border-blue-400' : gender === 'female' ? 'border-pink-400' : 'border-brand-line'} 
+                  ${!avatarUrl ? bgClass : ''}
+                `}>
                   {avatarUrl ? (
                     <Image 
                       src={avatarUrl} 
                       alt={authorName} 
                       width={32} 
                       height={32} 
-                      className="w-full h-full object-cover"
+                      className="w-8 h-8 object-cover"
                     />
                   ) : (
                     avatarLetter
@@ -4053,13 +5665,45 @@ function NavItem({ href, label, pathname, badgeCount }: { href: string, label: s
   );
 }
 
+
+// Вспомогательный компонент для иконок с тултипами
+function IconTooltip({ children, tooltip, onClick, href }: { children: React.ReactNode, tooltip: string, onClick?: () => void, href?: string }) {
+  const inner = (
+    <div className="w-10 h-10 flex items-center justify-center border-2 border-brand-line/50 rounded-brand bg-brand-surface hover:bg-brand-bg transition-colors text-lg">
+      {children}
+    </div>
+  );
+
+  // Определяем, во что оборачивать контент
+  let contentWrapper;
+  if (href) {
+    contentWrapper = <Link href={href}>{inner}</Link>;
+  } else if (onClick) {
+    contentWrapper = <button onClick={onClick} className="outline-none">{inner}</button>;
+  } else {
+    contentWrapper = <div className="outline-none">{inner}</div>; // <--- ИСПОЛЬЗУЕМ DIV ДЛЯ КОЛОКОЛЬЧИКА
+  }
+
+  return (
+    <div className="relative group flex items-center">
+      {contentWrapper}
+      
+      {/* Тултип */}
+      <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none flex flex-col items-center">
+        <div className="w-2 h-2 bg-brand-text rotate-45 -mb-1 z-10"></div>
+        <div className="bg-brand-text text-brand-bg text-[11px] font-bold px-2.5 py-1.5 rounded shadow-md whitespace-nowrap relative z-0">
+          {tooltip}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Header() {
   const [theme, setTheme] = useState('light');
   
-  // Читаем тему при загрузке
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') || 'light';
-    // Оборачиваем в setTimeout, чтобы ESLint не ругался на синхронный setState
     const timer = setTimeout(() => {
       setTheme(savedTheme);
       document.documentElement.setAttribute('data-theme', savedTheme);
@@ -4075,9 +5719,7 @@ export default function Header() {
   const pathname = usePathname();
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsMobileMenuOpen(false);
-    }, 0);
+    const timer = setTimeout(() => setIsMobileMenuOpen(false), 0);
     return () => clearTimeout(timer);
   }, [pathname]);
 
@@ -4109,7 +5751,6 @@ export default function Header() {
     }
   }, [user]);
 
-  // Логика подсчета непрочитанных сообщений
   useEffect(() => {
     if (!user) {
       const timer = setTimeout(() => setUnreadChats(0), 0);
@@ -4146,12 +5787,8 @@ export default function Header() {
     fetchUnreadCount();
 
     const channel = supabase.channel('header-unread-chats')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
-         fetchUnreadCount();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_reads' }, () => {
-         fetchUnreadCount();
-      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => fetchUnreadCount())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_reads' }, () => fetchUnreadCount())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -4193,31 +5830,42 @@ export default function Header() {
           </nav>
 
           <div className="flex items-center gap-2 md:gap-3 z-50">
-            <button 
-              onClick={toggleTheme}
-              aria-label={theme === 'light' ? 'Включить тёмную тему' : 'Включить светлую тему'}
-              className="w-11 h-11 hidden md:flex items-center justify-center border-2 border-brand-line rounded-brand bg-brand-surface hover:bg-brand-bg transition-colors"
-            >
-              {theme === 'light' ? '🌙' : '☀️'}
-            </button>
+            
+            {/* Тема */}
+            <div className="hidden md:block">
+              <IconTooltip tooltip="Переключить тему" onClick={toggleTheme}>
+                {theme === 'light' ? '🌙' : '☀️'}
+              </IconTooltip>
+            </div>
             
             <div className="hidden md:flex items-center gap-3">
               {user ? (
                 <>
-                 <NotificationsBell />
-                  <Link href={`/@${username}`} className="text-sm font-bold hover:text-brand-accent transition-colors">
-                    @{username}
-                  </Link>
-                  <button onClick={handleLogout} className="bg-brand-surface text-brand-text font-extrabold text-sm px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-accent hover:text-white transition-colors">
+                  {/* Уведомления */}
+                  <IconTooltip tooltip="Уведомления">
+                    <NotificationsBell />
+                  </IconTooltip>
+
+                  {/* Профиль */}
+                  <IconTooltip tooltip="Мой профиль" href={`/@${username}`}>
+                    🙋
+                  </IconTooltip>
+
+                  {/* Настройки */}
+                  <IconTooltip tooltip="Настройки" href="/settings">
+                    ⚙️
+                  </IconTooltip>
+
+                  <button onClick={handleLogout} className="bg-brand-surface text-brand-text font-extrabold text-sm px-4 py-2 border-2 border-brand-line/50 rounded-brand hover:bg-brand-accent hover:text-white transition-colors">
                     Выйти
                   </button>
                 </>
               ) : (
                 <>
-                  <Link href="/login" className="bg-brand-surface text-brand-text font-extrabold text-sm px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-bg transition-colors">
+                  <Link href="/login" className="bg-brand-surface text-brand-text font-extrabold text-sm px-4 py-2 border-2 border-brand-line/50 rounded-brand hover:bg-brand-bg transition-colors">
                     Войти
                   </Link>
-                  <Link href="/login?mode=register" className="bg-brand-accent text-brand-accent-ink font-extrabold text-sm px-4 py-2 border-2 border-brand-line rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors">
+                  <Link href="/login?mode=register" className="bg-brand-accent text-brand-accent-ink font-extrabold text-sm px-4 py-2 border-2 border-brand-line/50 rounded-brand hover:bg-brand-text hover:text-brand-bg transition-colors">
                     Регистрация
                   </Link>
                 </>
@@ -4230,13 +5878,10 @@ export default function Header() {
               </div>
             )}
 
-            {/* Кнопка бургер (возвращены полоски) */}
             <button 
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="md:hidden w-11 h-11 flex flex-col items-center justify-center gap-1.5 border-2 border-brand-line rounded-brand bg-brand-surface"
+              className="md:hidden w-11 h-11 flex flex-col items-center justify-center gap-1.5 border-2 border-brand-line/50 rounded-brand bg-brand-surface"
               aria-label={isMobileMenuOpen ? 'Закрыть меню' : 'Открыть меню'}
-              aria-expanded={isMobileMenuOpen}
-              aria-controls="mobile-menu"
             >
               <span className={`block w-5 h-0.5 bg-brand-text transition-transform ${isMobileMenuOpen ? 'rotate-45 translate-y-2' : ''}`}></span>
               <span className={`block w-5 h-0.5 bg-brand-text transition-opacity ${isMobileMenuOpen ? 'opacity-0' : ''}`}></span>
@@ -4278,30 +5923,32 @@ export default function Header() {
         )}
 
         <div className="mt-auto mb-10 flex flex-col gap-4">
-          
           {/* Кнопка смены темы для мобилок */}
           <button 
             onClick={toggleTheme}
-            className="animate-menu-item delay-3 bg-brand-surface text-brand-text font-extrabold text-lg p-3 border-2 border-brand-line rounded-brand flex items-center justify-center gap-2"
+            className="animate-menu-item delay-3 bg-brand-surface text-brand-text font-extrabold text-lg p-3 border-2 border-brand-line/50 rounded-brand flex items-center justify-center gap-2"
           >
-            {theme === 'light' ? '🌚 Темная тема' : '🌞 Светлая тема'}
+            {theme === 'light' ? '🌙 Темная тема' : '☀️ Светлая тема'}
           </button>
 
           {user ? (
             <>
-              <Link href={`/@${username}`} className="animate-menu-item delay-4 text-xl font-bold text-center border-2 border-brand-line p-3 rounded-brand">
+              <Link href={`/@${username}`} className="animate-menu-item delay-4 text-xl font-bold text-center border-2 border-brand-line/50 p-3 rounded-brand">
                 Мой профиль (@{username})
               </Link>
-              <button onClick={handleLogout} className="animate-menu-item delay-5 bg-brand-surface text-brand-text font-extrabold text-lg p-3 border-2 border-brand-line rounded-brand">
+              <Link href="/settings" className="animate-menu-item delay-5 bg-brand-surface text-brand-text font-extrabold text-lg p-3 border-2 border-brand-line/50 rounded-brand flex items-center justify-center gap-2">
+                ⚙️ Редактировать профиль
+              </Link>
+              <button onClick={handleLogout} className="animate-menu-item delay-5 bg-brand-bg text-red-600 font-extrabold text-lg p-3 border-2 border-red-300 rounded-brand">
                 Выйти
               </button>
             </>
           ) : (
             <>
-              <Link href="/login" className="animate-menu-item delay-4 bg-brand-surface text-brand-text font-extrabold text-lg p-3 border-2 border-brand-line rounded-brand text-center">
+              <Link href="/login" className="animate-menu-item delay-4 bg-brand-surface text-brand-text font-extrabold text-lg p-3 border-2 border-brand-line/50 rounded-brand text-center">
                 Войти
               </Link>
-              <Link href="/login?mode=register" className="animate-menu-item delay-5 bg-brand-accent text-brand-accent-ink font-extrabold text-lg p-3 border-2 border-brand-line rounded-brand text-center">
+              <Link href="/login?mode=register" className="animate-menu-item delay-5 bg-brand-accent text-brand-accent-ink font-extrabold text-lg p-3 border-2 border-brand-line/50 rounded-brand text-center">
                 Регистрация
               </Link>
             </>
@@ -5077,6 +6724,104 @@ export default eslintConfig;
 
 ````
 
+### `lib/achievements.ts`
+
+``ts
+export type Badge = {
+  level: number;
+  title: string;
+  threshold: number;
+  icon: string; // Путь к твоей картинке
+  color: string; // Цвет рамки или свечения
+};
+
+// Бейджи за организацию
+export const ORGANIZER_BADGES: Badge[] = [
+  { level: 1, title: 'Инициатор', threshold: 1, icon: '/badges/org_1.png', color: 'border-gray-400' },
+  { level: 2, title: 'Координатор', threshold: 5, icon: '/badges/org_5.png', color: 'border-blue-400' },
+  { level: 3, title: 'Душа компании', threshold: 10, icon: '/badges/org_10.png', color: 'border-green-400' },
+  { level: 4, title: 'Мастер встреч', threshold: 25, icon: '/badges/org_25.png', color: 'border-purple-400' },
+  { level: 5, title: 'Хранитель', threshold: 50, icon: '/badges/org_50.png', color: 'border-yellow-400' },
+  { level: 6, title: 'Архитектор', threshold: 100, icon: '/badges/org_100.png', color: 'border-orange-500' },
+  { level: 7, title: 'Гуру', threshold: 250, icon: '/badges/org_250.png', color: 'border-red-500' },
+  { level: 8, title: 'Великий организатор', threshold: 500, icon: '/badges/org_500.png', color: 'border-indigo-600' },
+  { level: 9, title: 'Легенда', threshold: 1000, icon: '/badges/org_1000.png', color: 'border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]' },
+];
+
+// Бейджи за участие
+export const PARTICIPANT_BADGES: Badge[] = [
+  { level: 1, title: 'Первопроходец', threshold: 1, icon: '/badges/part_1.png', color: 'border-gray-400' },
+  { level: 2, title: 'Общительный', threshold: 5, icon: '/badges/part_5.png', color: 'border-blue-400' },
+  { level: 3, title: 'Ветеран', threshold: 10, icon: '/badges/part_10.png', color: 'border-green-400' },
+  { level: 4, title: 'Магнит знакомств', threshold: 25, icon: '/badges/part_25.png', color: 'border-purple-400' },
+  { level: 5, title: 'Посол добра', threshold: 50, icon: '/badges/part_50.png', color: 'border-yellow-400' },
+  { level: 6, title: 'Хранитель традиций', threshold: 100, icon: '/badges/part_100.png', color: 'border-orange-500' },
+  { level: 7, title: 'Великий гость', threshold: 250, icon: '/badges/part_250.png', color: 'border-red-500' },
+  { level: 8, title: 'Икона', threshold: 500, icon: '/badges/part_500.png', color: 'border-indigo-600' },
+  { level: 9, title: 'Бессмертный', threshold: 1000, icon: '/badges/part_1000.png', color: 'border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]' },
+];
+
+// Функция для получения текущего бейджа и прогресса до следующего
+export function getBadgeStatus(count: number, badges: Badge[]) {
+  // Если 0 событий — бейджа нет
+  if (count === 0) return { current: null, next: badges[0], progress: 0 };
+
+  // Ищем текущий уровень
+  let current = badges[0];
+  let next = badges[1] || null;
+
+  for (let i = 0; i < badges.length; i++) {
+    if (count >= badges[i].threshold) {
+      current = badges[i];
+      next = badges[i + 1] || null;
+    } else {
+      break;
+    }
+  }
+
+  // Считаем прогресс до следующего
+  let progress = 100;
+  if (next) {
+    const range = next.threshold - current.threshold;
+    const achieved = count - current.threshold;
+    progress = Math.min(100, Math.max(0, Math.round((achieved / range) * 100)));
+  }
+
+  return { current, next, progress };
+}
+````
+
+### `lib/admin-utils.ts`
+
+``ts
+import { createClient } from '@/lib/supabase-server';
+import { redirect } from 'next/navigation';
+
+export async function requireAdmin() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  // Если не авторизован — на страницу входа
+  if (!user) {
+    redirect('/login');
+  }
+
+  // Получаем роль
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  // Если роль не админ и не модератор — на главную
+  if (profile?.role !== 'admin' && profile?.role !== 'moderator') {
+    redirect('/');
+  }
+
+  return { user, role: profile.role };
+}
+````
+
 ### `lib/event-access.ts`
 
 ``ts
@@ -5144,6 +6889,8 @@ export type EventListItemDTO = {
   maxParticipants: number;
   approvedParticipantsCount: number;
   isFull: boolean;
+  status: 'active' | 'cancelled';
+  cancelReason?: string | null;
   // публичное представление места — всегда безопасно
   publicLocationLabel: string;      // "Парк Горького" или "Место скрыто организатором"
   locationIsHidden: boolean;       // факт скрытия, не сами данные
@@ -5168,6 +6915,7 @@ export type EventListItemDTO = {
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ApplicationStatus, EventListItemDTO } from './event-dto';
 import { type ViewerContext, canSeeExactLocation } from './event-access';
+import { getBadgeStatus, ORGANIZER_BADGES } from './achievements';
 
 type EventRow = {
   id: string;
@@ -5179,12 +6927,14 @@ type EventRow = {
   organizer_name: string;
   organizer_rank: string;
   max_participants: number;
+  status: string;
+  cancel_reason: string | null;
   location: string;
   lat: number | null;
   lng: number | null;
   hide_location: boolean;
   is_full: boolean;
-  city: string | null; // <--- 1. ДОБАВЛЕНО В ТИП
+  city: string | null;
   profiles?: { avatar_url: string | null; gender: string | null } | { avatar_url: string | null; gender: string | null }[] | null;
 };
 
@@ -5215,17 +6965,19 @@ export async function getEventListDTOs(
       lng,
       hide_location,
       is_full,
-      city, 
-      profiles!events_organizer_profile_fkey ( avatar_url, gender )
+      status,
+      cancel_reason,
+      city,
+      profiles ( avatar_url, gender )
     `,
       { count: 'exact' }
     );
 
-  // Логика фильтрации по времени (архив или будущие)
   if (isArchive) {
-    query = query.lt('date_time', new Date().toISOString());
+    const now = new Date().toISOString();
+    query = query.or(`date_time.lt.${now},status.eq.cancelled`);
   } else {
-    query = query.gte('date_time', new Date().toISOString());
+    query = query.gte('date_time', new Date().toISOString()).eq('status', 'active');
   }
 
   const { data, error, count } = await query
@@ -5241,7 +6993,24 @@ export async function getEventListDTOs(
 
   const ids = events.map((e) => e.id);
 
-  // 2. Агрегат approved
+  // 2. Считаем количество прошедших событий для каждого организатора
+  const organizerIds = [...new Set(events.map(e => e.organizer_id))];
+  const orgPastEventsCount = new Map<string, number>();
+  
+  if (organizerIds.length > 0) {
+    const { data: orgPastEvents } = await supabase
+      .from('events')
+      .select('organizer_id')
+      .in('organizer_id', organizerIds)
+      .lt('date_time', new Date().toISOString())
+      .eq('status', 'active');
+      
+    orgPastEvents?.forEach(e => {
+      orgPastEventsCount.set(e.organizer_id, (orgPastEventsCount.get(e.organizer_id) || 0) + 1);
+    });
+  }
+
+  // 3. Агрегат approved
   const approvedCount = new Map<string, number>();
   {
     const { data: approvedRows } = await supabase
@@ -5254,7 +7023,7 @@ export async function getEventListDTOs(
     }
   }
 
-  // 3. Мои заявки
+  // 4. Мои заявки
   const myStatus = new Map<string, ApplicationStatus>();
   if (viewer.kind === 'user') {
     const { data: myApps } = await supabase
@@ -5269,7 +7038,7 @@ export async function getEventListDTOs(
     }
   }
 
-  // 4. Считаем непрочитанные
+  // 5. Считаем непрочитанные
   const unreadCounts = new Map<string, number>();
   if (viewer.kind === 'user') {
     const { data: reads } = await supabase
@@ -5299,13 +7068,17 @@ export async function getEventListDTOs(
     }
   }
 
-  // 5. Сборка DTO
+  // 6. Сборка DTO
   const items = events.map((e): EventListItemDTO => {
     const myApp = myStatus.get(e.id) ?? null;
     const allowed = canSeeExactLocation(e, viewer, myApp);
     const approved = approvedCount.get(e.id) ?? 0;
     const isFull = Boolean(e.is_full) || approved >= e.max_participants;
     const profile = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles;
+
+    // Вычисляем динамический ранг организатора на лету
+    const pastCount = orgPastEventsCount.get(e.organizer_id) || 0;
+    const dynamicRank = getBadgeStatus(pastCount, ORGANIZER_BADGES).current?.title || 'Новичок';
 
     const dto: EventListItemDTO = {
       id: e.id,
@@ -5315,7 +7088,7 @@ export async function getEventListDTOs(
       title: e.title,
       description: e.description,
       organizerName: e.organizer_name,
-      organizerRank: e.organizer_rank,
+      organizerRank: dynamicRank, // <--- ИСПОЛЬЗУЕМ ВЫЧИСЛЕННЫЙ РАНГ
       maxParticipants: e.max_participants,
       approvedParticipantsCount: approved,
       isFull,
@@ -5323,7 +7096,9 @@ export async function getEventListDTOs(
         ? 'Место скрыто организатором'
         : e.location,
       locationIsHidden: e.hide_location,
-      city: e.city, // <--- 3. ДОБАВЛЕНО В DTO
+      status: e.status as 'active' | 'cancelled',
+      cancelReason: e.cancel_reason,
+      city: e.city,
       myApplicationStatus: myApp,
       isOrganizer: viewer.kind === 'user' && viewer.userId === e.organizer_id,
       organizerAvatar: profile?.avatar_url ?? null,
@@ -5574,13 +7349,52 @@ export async function proxy(request: NextRequest) {
     }
   )
 
-  await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // 1. ЕСЛИ ПОЛЬЗОВАТЕЛЬ АВТОРИЗОВАН - ПРОВЕРЯЕМ БАН
+  if (user) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('is_banned')
+      .eq('id', user.id)
+      .single();
+
+    if (profile?.is_banned) {
+      // Если он забанен и пытается зайти куда-то, кроме страницы /banned и /login
+      if (request.nextUrl.pathname !== '/banned' && request.nextUrl.pathname !== '/login') {
+        const url = request.nextUrl.clone()
+        url.pathname = '/banned'
+        return NextResponse.redirect(url)
+      }
+    } else {
+      // Если он НЕ забанен, но сидит на странице /banned — выкидываем его оттуда
+      if (request.nextUrl.pathname === '/banned') {
+        const url = request.nextUrl.clone()
+        url.pathname = '/'
+        return NextResponse.redirect(url)
+      }
+    }
+  }
+
+  // 2. ЕСЛИ НЕ АВТОРИЗОВАН - НЕ ПУСКАЕМ В АДМИНКУ
+  if (!user && request.nextUrl.pathname.startsWith('/admin')) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
+  }
 
   return supabaseResponse
 }
 
 export const config = {
   matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * Feel free to modify this to fit your needs.
+     */
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

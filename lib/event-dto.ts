@@ -11,6 +11,8 @@ export type EventListItemDTO = {
   maxParticipants: number;
   approvedParticipantsCount: number;
   isFull: boolean;
+  status: 'active' | 'cancelled';
+  cancelReason?: string | null;
   // публичное представление места — всегда безопасно
   publicLocationLabel: string;      // "Парк Горького" или "Место скрыто организатором"
   locationIsHidden: boolean;       // факт скрытия, не сами данные

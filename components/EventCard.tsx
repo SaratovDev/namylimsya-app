@@ -9,6 +9,7 @@ import { applyToEvent, cancelApplication } from '@/app/actions';
 import type { User } from '@supabase/supabase-js';
 import ClientMapWrapper from './ClientMapWrapper';
 import { useToast } from './Toast';
+import { getBadgeStatus, ORGANIZER_BADGES } from '@/lib/achievements';
 
 export default function EventCard({ item }: { item: EventListItemDTO }) {
   const {
@@ -33,6 +34,8 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
     organizerAvatar,
     organizerGender,
     city,
+    status,
+    cancelReason,
   } = item;
 
   const { showSuccess, showError } = useToast();
@@ -123,7 +126,7 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
   });
 
   return (
-    <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg flex flex-col sm:flex-row overflow-hidden hover:opacity-95 transition-opacity w-full relative">
+    <article className="bg-brand-surface border-2 border-brand-line rounded-brand-lg flex flex-col sm:flex-row overflow-hidden hover:opacity-95 transition-opacity w-full relative h-full">
       
       {/* ЛЕВАЯ КОЛОНКА (Дата, Время, Места) */}
       <div className="bg-brand-bg/50 p-3 sm:p-4 sm:w-[140px] flex-shrink-0 flex flex-row sm:flex-col items-center sm:items-start border-b-2 sm:border-b-0 sm:border-r-2 border-brand-line justify-between sm:justify-center">
@@ -155,13 +158,25 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
       <div className="p-4 sm:p-5 md:p-6 flex-grow flex flex-col min-w-0">
         
         {/* Категория над заголовком */}
-        <div className="mb-2">
-          <span className="text-[9px] sm:text-[10px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-0.5 rounded border border-brand-cat/30 inline-block">
+  {/* Категория и Статус над заголовком */}
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-extrabold uppercase text-brand-cat bg-brand-cat-soft px-2 py-0.5 rounded border border-brand-cat/30 inline-block">
             {category}
           </span>
+          
+          {status === 'cancelled' && (
+            <span className="text-[10px] uppercase font-extrabold bg-red-100 text-red-700 px-2 py-0.5 rounded border border-red-300 inline-block">
+              Отменено
+            </span>
+          )}
         </div>
 
-        {/* Заголовок */}
+        {/* Блок причины отмены (если есть) */}
+        {status === 'cancelled' && cancelReason && (
+          <div className="mb-3 p-2 bg-red-50 text-red-800 border border-red-200 rounded text-xs font-bold">
+            Причина отмены: {cancelReason}
+          </div>
+        )}
         <Link
           href={`/event/${id}`}
           className="block hover:text-brand-accent transition-colors pr-12"
@@ -205,14 +220,14 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
         <div className="flex flex-wrap items-center justify-between gap-3 mt-auto pt-2">
           
           <div className="flex items-center gap-2 text-sm">
-            <div
-              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-brand-line flex items-center justify-center text-[10px] font-extrabold flex-shrink-0 overflow-hidden
+                        <div
+              className={`w-12 h-12 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-[10px] font-extrabold flex-shrink-0 overflow-hidden border-2
                 ${
                   organizerGender === 'male'
-                    ? 'bg-blue-100 text-blue-800'
+                    ? 'bg-blue-100 text-blue-800 border-blue-600'
                     : organizerGender === 'female'
-                    ? 'bg-pink-100 text-pink-800'
-                    : 'bg-gray-200 text-gray-700'
+                    ? 'bg-pink-100 text-pink-800 border-pink-600'
+                    : 'bg-gray-200 text-gray-700 border-brand-line'
                 }
               `}
             >
@@ -220,9 +235,9 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
                 <Image
                   src={organizerAvatar}
                   alt={organizerName}
-                  width={24}
-                  height={24}
-                  className="w-4 h-4 sm:w-5 sm:h-5 object-contain"
+                  width={90}
+                  height={90}
+                  className="w-full h-full sm:w-8 sm:h-8 object-contain"
                 />
               ) : (
                 organizerName.charAt(0)
@@ -243,13 +258,24 @@ export default function EventCard({ item }: { item: EventListItemDTO }) {
           </div>
 
           <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-             {!isPast && (
+               {!isPast && (
               <button
                 onClick={handleApply}
                 disabled={buttonDisabled}
-                className={`flex-1 sm:flex-none font-extrabold text-[11px] sm:text-[13px] uppercase px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-brand-line rounded-brand transition-colors ${buttonClass}`}
+                className={`flex-1 sm:flex-none font-extrabold text-[11px] sm:text-[13px] uppercase px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-brand-line rounded-brand transition-colors flex items-center justify-center gap-2 ${buttonClass}`}
               >
-                {buttonText}
+                {/* Если идет загрузка, показываем спиннер */}
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Отправка...</span>
+                  </>
+                ) : (
+                  buttonText
+                )}
               </button>
             )}
 

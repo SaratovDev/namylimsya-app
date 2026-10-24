@@ -21,7 +21,7 @@ export default function AvatarPicker({ currentAvatar, gender, username, userId }
   const folder = gender === 'male' ? 'male' : gender === 'female' ? 'female' : 'none';
   
   // Генерируем массив путей к картинкам (от 1 до 30)
-  const avatars = Array.from({ length: 30 }, (_, i) => `/avatars/${folder}/${i + 1}.png`);
+  const avatars = Array.from({ length: 8 }, (_, i) => `/avatars/${folder}/${i + 1}.png`);
 
   const handleSelectAvatar = async (avatarUrl: string) => {
     setIsSaving(true);

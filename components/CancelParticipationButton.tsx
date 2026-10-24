@@ -22,7 +22,7 @@ export default function CancelParticipationButton({ eventId, eventTitle }: { eve
         setIsModalOpen(false);
         router.refresh();
       }
-    } catch (error) {
+    } catch {
       showError('Произошла ошибка');
     } finally {
       setLoading(false);

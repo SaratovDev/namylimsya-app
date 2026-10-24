@@ -61,7 +61,7 @@ export default function CreateEventForm() {
       showSuccess('Событие успешно создано!');
       formRef.current?.closest('details')?.removeAttribute('open');
       router.refresh();
-    } catch (error) {
+    } catch{
       // Если произошло что-то совсем непредвиденное
       showError('Произошла непредвиденная ошибка');
     } finally {

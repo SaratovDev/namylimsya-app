@@ -1,26 +1,35 @@
 // components/EventList.tsx
-import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getViewer } from '@/lib/event-access';
 import { getEventListDTOs } from '@/lib/event-queries';
-import EventCard from './EventCard';
+import InfiniteEventList from './InfiniteEventList';
 
 export default async function EventList({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+   searchParams: Promise<{ page?: string, category?: string, date_from?: string, date_to?: string, city?: string }>;
 }) {
   const params = await searchParams;
-  const currentPage = Number(params.page) || 1;
-  const limit = 10; // Сколько грузим за раз
-  const offset = (currentPage - 1) * limit;
+  const category = params.category;
+  const dateFrom = params.date_from;
+  const dateTo = params.date_to;
+  const city = params.city;
+  
+  // Всегда грузим только первую страницу на сервере
+  const limit = 10;
+  const offset = 0;
 
   const supabase = await createClient();
   const viewer = await getViewer(supabase);
 
   let result;
   try {
-    result = await getEventListDTOs(supabase, viewer, limit, offset);
+    result = await getEventListDTOs(supabase, viewer, limit, offset, false, {
+      category,
+      dateFrom,
+      dateTo,
+      city
+    });
   } catch (error) {
     console.error('ОШИБКА БАЗЫ:', error);
     return (
@@ -30,32 +39,11 @@ export default async function EventList({
     );
   }
 
-  const { items, total } = result;
-  const hasMore = offset + items.length < total;
-
-  if (items.length === 0 && currentPage === 1) {
-    return (
-      <div className="text-center py-10 border-2 border-dashed border-brand-line rounded-brand-lg text-brand-muted font-bold">
-        Пока нет событий. Станьте первым организатором!
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-6 items-center w-full">
-      {items.map((item) => (
-        <EventCard key={item.id} item={item} />
-      ))}
-      
-      {/* Кнопка "Показать ещё" */}
-      {hasMore && (
-        <Link
-          href={`/?page=${currentPage + 1}`}
-          className="mt-4 px-6 py-3 bg-brand-surface border-2 border-brand-line rounded-brand font-extrabold uppercase hover:bg-brand-bg transition-colors"
-        >
-          Показать ещё
-        </Link>
-      )}
-    </div>
+    <InfiniteEventList 
+      initialItems={result.items} 
+      initialTotal={result.total} 
+      filters={{ category, dateFrom, dateTo, city }} 
+    />
   );
 }

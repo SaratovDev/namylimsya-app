@@ -21,7 +21,7 @@ export default function EventAdminActions({ eventId, eventTitle }: { eventId: st
         showSuccess('Событие отменено. Участники уведомлены.');
         router.push('/my-events');
       }
-    } catch (error) {
+    } catch{
       showError('Произошла ошибка');
     } finally {
       setLoading(false);

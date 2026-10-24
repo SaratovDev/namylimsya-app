@@ -77,6 +77,17 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 
       {/* Шапка события */}
       <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 md:p-8 mb-6 relative">
+                {event.status === 'cancelled' && (
+          <div className="mb-4 bg-red-100 border-2 border-red-300 text-red-800 p-4 rounded-brand font-bold flex items-center gap-3">
+            <span className="text-2xl">🚫</span>
+            <div>
+              <p className="uppercase text-sm">Это событие отменено организатором</p>
+              {event.cancel_reason && (
+                <p className="text-xs font-medium mt-1">Причина: {event.cancel_reason}</p>
+              )}
+            </div>
+          </div>
+        )}
         <div className="flex flex-col md:flex-row justify-between gap-6">
           
           <div className="flex-1">
@@ -142,11 +153,11 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
-          {isOrganizer && (
-            <div className="mt-4 pt-4 border-t-2 border-dashed border-brand-line">
-              <EventAdminActions eventId={event.id} eventTitle={event.title} />
-            </div>
-          )}
+{isOrganizer && event.status !== 'cancelled' && (
+  <div className="mb-4 mt-4 pt-4 border-t-2 border-dashed border-brand-line">
+    <EventAdminActions eventId={event.id} eventTitle={event.title} />
+  </div>
+)}
 
           {myAppStatus === 'approved' && (
           <div className="mt-4">

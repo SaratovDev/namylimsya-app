@@ -263,14 +263,18 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
               <div key={msg.id} className={`group flex gap-2 max-w-[85%] ${isMine ? 'self-end flex-row-reverse' : 'self-start'}`}>
                 
                 {/* Аватарка (картинка или буква) */}
-                <div className={`w-8 h-8 flex-shrink-0 rounded-full border border-brand-line/20 flex items-center justify-center text-xs font-extrabold overflow-hidden mt-auto mb-1 ${!avatarUrl ? bgClass : 'bg-brand-bg'}`}>
+                 <div className={`w-12 h-12 flex-shrink-0 rounded-full flex items-center justify-center text-xs font-extrabold overflow-hidden mt-auto mb-1 border-2
+                  ${avatarUrl ? 'bg-brand-bg' : ''} 
+                  ${gender === 'male' ? 'border-blue-400' : gender === 'female' ? 'border-pink-400' : 'border-brand-line'} 
+                  ${!avatarUrl ? bgClass : ''}
+                `}>
                   {avatarUrl ? (
                     <Image 
                       src={avatarUrl} 
                       alt={authorName} 
                       width={32} 
                       height={32} 
-                      className="w-full h-full object-cover"
+                      className="w-8 h-8 object-cover"
                     />
                   ) : (
                     avatarLetter

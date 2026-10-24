@@ -22,13 +22,14 @@ function EventSkeleton() {
 export default function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string, category?: string, date_from?: string, date_to?: string }>;
 }) {
   return (
     <main className="max-w-[1100px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-8 items-start mt-6 px-4 md:px-6 pb-12 relative">
       
       <div className="flex flex-col gap-6">
         
+        {/* ВОЗВРАЩАЕМ ФОРМУ СОЗДАНИЯ */}
         <details className="bg-brand-surface border-2 border-brand-line rounded-brand-lg overflow-hidden group">
           <summary className="list-none cursor-pointer flex items-center gap-3 p-5 font-extrabold text-lg uppercase hover:bg-brand-bg/50 transition-colors">
             <span className="w-7 h-7 flex items-center justify-center border-2 border-brand-line rounded-full bg-brand-accent text-brand-accent-ink text-xl leading-none group-open:rotate-45 transition-transform duration-300">+</span>
@@ -52,9 +53,10 @@ export default function Home({
       </div>
 
       <div className="hidden lg:block">
-        <Sidebar />
+        <Suspense fallback={<div className="h-40 bg-brand-surface animate-pulse rounded" />}>
+          <Sidebar />
+        </Suspense>
       </div>
-
     </main>
   );
 }

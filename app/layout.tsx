@@ -3,6 +3,7 @@ import "./globals.css";
 import Header from "@/components/Header";
 import PageTransition from "@/components/PageTransition";
 import { ToastProvider } from "@/components/Toast";
+import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: "Намылимся. — Лента",
@@ -41,10 +42,13 @@ export default function RootLayout({
           {children}
         </PageTransition>
 
-        <footer className="max-w-[1200px] w-full mx-auto mt-auto px-6 py-5 text-brand-muted text-[13px] border-t-2 border-brand-line">
-          <p>«Намылимся.» — площадка для живых встреч. Ответственность за проведение событий лежат на организаторах и участниках.</p>
-          <p>16+ · Правила сообщества · Поддержка</p>
+          <footer className="max-w-[1100px] w-full mx-auto mt-auto px-6 py-5 text-brand-muted text-[13px] border-t-2 border-brand-line flex justify-between items-center">
+          <div>
+            <p>«Намылимся.» — площадка для живых встреч. Ответственность за проведение событий лежат на организаторах и участниках.</p>
+            <p>16+ · Правила сообщества · <Link href="/support" className="hover:text-brand-accent transition-colors">Написать в поддержку</Link></p>
+          </div>
         </footer>
+
         </ToastProvider>
       </body>
     </html>
