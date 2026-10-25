@@ -80,7 +80,7 @@ function LoginForm() {
     }
     // Вызываем API Telegram. Передаем USERNAME (без @), а не числовой ID!
     window.Telegram.Login.auth(
-      { bot_id: TELEGRAM_BOT_USERNAME, request_access: 'write' }, 
+      { bot_id: "8934385689", request_access: 'write' }, 
       (user) => {
         if (user) window.onTelegramAuth?.(user);
       }
