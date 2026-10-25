@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
 import { useRouter } from 'next/navigation';
+const [usernameInput, setUsernameInput] = useState('');
 
 const INTERESTS_LIST = [
   'Спорт', 'Кино', 'Музыка', 'Игры', 'Книги', 'Фотография', 'Кулинария', 'Путешествия', 
@@ -35,6 +36,7 @@ const [profile, setProfile] = useState<{ id: string; username: string } | null>(
       supabase.from('profiles').select('*').eq('id', user.id).single().then(({ data }) => {
         if (data) {
           setProfile(data);
+          setUsernameInput(data.username || '');
           setAge(data.age?.toString() || '');
           setGender(data.gender || 'none');
           setBio(data.bio || '');
@@ -59,29 +61,46 @@ const [profile, setProfile] = useState<{ id: string; username: string } | null>(
     }
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!profile) return; // <--- Проверка на null
-    setSaving(true);
-    try {
-      const { error } = await supabase.from('profiles').update({
-        age: age ? parseInt(age) : null,
-        gender,
-        bio: bio.trim() || null,
-        telegram: telegram.trim() || null,
-        vk: vk.trim() || null,
-        interests: interests.length > 0 ? interests : null
-      }).eq('id', profile.id);
+const handleSave = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!profile) return;
+  
+  // Простая валидация ника
+  if (usernameInput.length < 3) {
+    showError('Никнейм должен быть не короче 3 символов');
+    return;
+  }
 
-      if (error) throw error;
-      showSuccess('Профиль успешно обновлен!');
-      router.push(`/@${profile.username}`);
-    } catch {
-      showError('Ошибка сохранения профиля');
-    } finally {
-      setSaving(false);
+  setSaving(true);
+  try {
+    const { error } = await supabase.from('profiles').update({
+      username: usernameInput, // <--- ДОБАВЬ ЭТО
+      age: age ? parseInt(age) : null,
+      gender,
+      bio: bio.trim() || null,
+      telegram: telegram.trim() || null,
+      vk: vk.trim() || null,
+      interests: interests.length > 0 ? interests : null
+    }).eq('id', profile.id);
+
+    if (error) {
+      // Если база выдала ошибку уникальности (такой ник уже есть)
+      if (error.code === '23505') {
+        throw new Error('Этот никнейм уже занят. Выберите другой.');
+      }
+      throw error;
     }
-  };
+    
+    showSuccess('Профиль успешно обновлен!');
+    // Обновляем URL профиля, если ник изменился
+    router.push(`/@${usernameInput}`);
+    router.refresh();
+  } catch (error) {
+    showError(error instanceof Error ? error.message : 'Ошибка сохранения профиля');
+  } finally {
+    setSaving(false);
+  }
+};
 
   if (loading) return <div className="text-center py-20 font-bold">Загрузка...</div>;
 
@@ -93,7 +112,19 @@ const [profile, setProfile] = useState<{ id: string; username: string } | null>(
         </h1>
 
         <form onSubmit={handleSave} className="flex flex-col gap-6">
-          
+          <div className="flex flex-col gap-1.5 mb-4">
+  <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш никнейм (публичное имя)</label>
+  <input 
+    type="text" 
+    value={usernameInput} 
+    onChange={e => setUsernameInput(e.target.value.replace(/[^a-zA-Zа-яА-Я0-9_]/g, ''))} 
+    required 
+    minLength={3}
+    maxLength={32}
+    className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" 
+  />
+  <span className="text-[11px] text-brand-muted font-bold">Разрешены буквы, цифры и _. Должен быть уникальным.</span>
+</div>
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-[12px] font-extrabold uppercase text-brand-muted">Возраст (полных лет)</label>
