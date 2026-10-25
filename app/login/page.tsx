@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense, useRef } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -21,8 +21,6 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const router = useRouter();
-
-  const tgContainerRef = useRef<HTMLDivElement>(null);
 
   // Загрузка городов
   useEffect(() => {
@@ -70,28 +68,26 @@ function LoginForm() {
 
     window.onTelegramAuth = handleTelegramAuth;
 
-    // Принудительно вставляем скрипт Telegram
-    if (tgContainerRef.current) {
-      tgContainerRef.current.innerHTML = ''; // Очищаем контейнер
-      const script = document.createElement('script');
-      script.src = 'https://telegram.org/js/telegram-widget.js?23';
-      script.async = true;
-      script.setAttribute('data-telegram-login', TELEGRAM_BOT_USERNAME);
-      script.setAttribute('data-size', 'large');
-      script.setAttribute('data-radius', '4');
-      script.setAttribute('data-onauth', 'onTelegramAuth(user)');
-      script.setAttribute('data-request-access', 'write');
-      
-      tgContainerRef.current.appendChild(script);
-    }
-
     return () => {
       window.onTelegramAuth = undefined;
     };
   }, [router]);
 
+  const handleTgClick = () => {
+    if (!window.Telegram) {
+      alert('Скрипт Telegram еще загружается или заблокирован. Подождите пару секунд.');
+      return;
+    }
+    // Вызываем API Telegram. Передаем USERNAME (без @), а не числовой ID!
+    window.Telegram.Login.auth(
+      { bot_id: TELEGRAM_BOT_USERNAME, request_access: 'write' }, 
+      (user) => {
+        if (user) window.onTelegramAuth?.(user);
+      }
+    );
+  };
+
   const handleAuth = async (e: React.FormEvent) => {
-    // ... (оставляем твой код формы без изменений)
     e.preventDefault();
     setLoading(true);
     setMessage('');
@@ -147,11 +143,18 @@ function LoginForm() {
         </div>
       )}
 
-      {/* Контейнер для официальной кнопки Telegram */}
+      {/* Кастомная кнопка Telegram */}
       <div className="w-full flex flex-col items-center mb-6">
-        <div className="min-h-[48px] flex items-center justify-center w-full" ref={tgContainerRef}>
-          {/* Скрипт вставится сюда через useEffect */}
-        </div>
+        <button
+          type="button"
+          onClick={handleTgClick}
+          className="w-full bg-[#2AABEE] text-white font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-[#229ED9] transition-colors flex items-center justify-center gap-2"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.460-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+          </svg>
+          Войти через Telegram
+        </button>
 
         <div className="flex items-center gap-2 w-full mt-6">
           <div className="flex-1 h-px bg-brand-line/50"></div>
