@@ -6,9 +6,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const CLIENT_SECRET = 'lqu2srO08Sdn_qzHB4ZsK5xL66Qd1GYTE0rN1fYD7I-Bh9201Mt_KA' // <-- ВАЖНО!
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -16,33 +16,33 @@ serve(async (req) => {
   }
 
   try {
-    const { code } = await req.json();
+    const { code: qtoken } = await req.json();
 
-    if (!code) throw new Error('No code provided');
+    if (!qtoken) throw new Error('No qtoken provided');
 
-    // 1. Меняем code на access_token (новый метод OIDC)
+    // Меняем qtoken на access_token
     const tokenRes = await fetch('https://oauth.telegram.org/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        code: code,
+        code: qtoken,
         client_id: '8934385689',
-        client_secret: 'lqu2srO08Sdn_qzHB4ZsK5xL66Qd1GYTE0rN1fYD7I-Bh9201Mt_KA', // <-- ВСТАВЬ СЮДА SECRET СО СКРИНШОТА
-        redirect_uri: 'https://namylimsya.vercel.app/auth/callback' // <-- ВСТАВЬ СЮДА СВОЙ ДОМЕН
+        client_secret: CLIENT_SECRET,
+        redirect_uri: 'https://namylimsya.vercel.app/login' // <-- ВАЖНО: указываем /login, так как токен шлется сюда
       })
     });
 
     const tokenData = await tokenRes.json();
     if (tokenData.error) throw new Error(tokenData.error_description || 'Token error');
 
-    // 2. Получаем данные пользователя
+    // Получаем данные пользователя
     const userRes = await fetch('https://oauth.telegram.org/userinfo', {
       headers: { Authorization: `Bearer ${tokenData.access_token}` }
     });
     const tgUser = await userRes.json();
 
-    // 3. Ищем или создаем пользователя в Supabase
+    // Ищем или создаем пользователя
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: existingProfile } = await supabaseAdmin
       .from('profiles')
@@ -69,7 +69,7 @@ serve(async (req) => {
       await supabaseAdmin.from('profiles').update({ telegram_id: tgUser.id }).eq('id', userId);
     }
 
-    // 4. Выдаем токен Supabase
+    // Выдаем токен Supabase
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: 'magiclink',
       email: email,

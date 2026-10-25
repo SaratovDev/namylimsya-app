@@ -34,6 +34,42 @@ function LoginForm() {
     return () => clearTimeout(timer);
   }, [isRegisterMode]);
 
+    // Перехватываем токен, который Telegram шлет в URL
+  // Перехватываем токен, который Telegram шлет в URL
+  useEffect(() => {
+    const qtoken = searchParams.get('qtoken');
+    if (qtoken) {
+      setLoading(true);
+      setMessage('Авторизация через Telegram...');
+      
+      // Отправляем токен на нашу Edge-функцию
+      fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/telegram-auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: qtoken }), // Передаем как code
+      })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Ошибка сервера');
+        
+        if (data.token) {
+          return supabase.auth.verifyOtp({ token_hash: data.token, type: 'magiclink' });
+        }
+        throw new Error('Нет токена от Supabase');
+      })
+      .then(({ error }) => {
+        if (error) throw error;
+        router.push('/');
+        router.refresh();
+      })
+      .catch(err => {
+        console.error(err);
+        setMessage(err.message || 'Ошибка Telegram');
+        setLoading(false);
+      });
+    }
+  }, [searchParams, router]);
+
   // === НОВЫЙ МЕТОД: ПРОСТО РЕДИРЕКТ В TELEGRAM ===
   const handleTgLogin = () => {
     // Берем текущий домен и добавляем путь для колбэка
