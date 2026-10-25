@@ -45,12 +45,11 @@ function LoginForm() {
       setLoading(false);
     }
   };
-
-  // === ВХОД ЧЕРЕЗ VK ===
+ // === ВХОД ЧЕРЕЗ VK ===
   const handleVkLogin = async () => {
     setLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'vk', // В Supabase это встроенный провайдер
+      provider: 'vk' as any, // <-- Добавили as any, чтобы TypeScript не ругался
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
       },
