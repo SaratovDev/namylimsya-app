@@ -80,7 +80,7 @@ function LoginForm() {
     window.onTelegramAuth = handleTelegramAuth;
 
     return () => {
-      delete window.onTelegramAuth;
+      window.onTelegramAuth = undefined;
     };
   }, [router]);
 
