@@ -6,10 +6,13 @@ const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
 serve(async (req) => {
-  // Обработка CORS (чтобы запросы с браузера не блокировались)
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+    return new Response('ok', { headers: corsHeaders })
   }
 
   try {
@@ -113,24 +116,19 @@ serve(async (req) => {
     if (linkError) throw linkError;
 
     // Возвращаем токены
-    return new Response(JSON.stringify({ 
+       return new Response(JSON.stringify({ 
       token: linkData.properties.hashed_token,
       user_id: userId
     }), { 
-      headers: { 
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-      } 
+      headers: { ...corsHeaders, "Content-Type": "application/json" } 
     });
 
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return new Response(JSON.stringify({ error: message }), { 
       status: 500,
-      headers: { 
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-      } 
+      headers: { ...corsHeaders, "Content-Type": "application/json" } 
     });
   }
 })
+
