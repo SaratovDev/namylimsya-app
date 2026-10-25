@@ -149,3 +149,10 @@ details > summary::-webkit-details-marker {
 .animate-fade-in-up {
   animation: fade-in-up 0.3s ease-out forwards;
 }
+
+/* Фикс для Telegram Login Widget */
+iframe[src*="telegram.org"] {
+  position: static !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
