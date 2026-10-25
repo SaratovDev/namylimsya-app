@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -17,61 +16,63 @@ serve(async (req) => {
   }
 
   try {
-    const { hash, ...data } = await req.json();
+    const { code } = await req.json();
 
-    const dataCheckString = Object.keys(data)
-      .sort()
-      .map(key => `${key}=${data[key]}`)
-      .join('\n');
+    if (!code) throw new Error('No code provided');
 
-    const secretKey = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(BOT_TOKEN));
-    const hmacKey = await crypto.subtle.importKey('raw', secretKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const signature = await crypto.subtle.sign('HMAC', hmacKey, new TextEncoder().encode(dataCheckString));
-    
-    const hexSignature = Array.from(new Uint8Array(signature))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
+    // 1. Меняем code на access_token (новый метод OIDC)
+    const tokenRes = await fetch('https://oauth.telegram.org/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: '8934385689',
+        client_secret: 'lqu2srO08Sdn_qzHB4ZsK5xL66Qd1GYTE0rN1fYD7I-Bh9201Mt_KA', // <-- ВСТАВЬ СЮДА SECRET СО СКРИНШОТА
+        redirect_uri: 'https://namylimsya.vercel.app/auth/callback' // <-- ВСТАВЬ СЮДА СВОЙ ДОМЕН
+      })
+    });
 
-    if (hexSignature !== hash) {
-      return new Response(JSON.stringify({ error: 'Invalid signature' }), { 
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
-    }
+    const tokenData = await tokenRes.json();
+    if (tokenData.error) throw new Error(tokenData.error_description || 'Token error');
 
+    // 2. Получаем данные пользователя
+    const userRes = await fetch('https://oauth.telegram.org/userinfo', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` }
+    });
+    const tgUser = await userRes.json();
+
+    // 3. Ищем или создаем пользователя в Supabase
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    
     const { data: existingProfile } = await supabaseAdmin
       .from('profiles')
       .select('id')
-      .eq('telegram_id', data.id)
+      .eq('telegram_id', tgUser.id)
       .maybeSingle();
 
     let userId;
+    const email = `tg_${tgUser.id}@namylimsya.local`;
 
     if (existingProfile) {
       userId = existingProfile.id;
     } else {
-      const email = `tg_${data.id}@namylimsya.local`;
-      const baseUsername = data.username || data.first_name || `user_${data.id}`;
-      const safeUsername = baseUsername.replace(/[^a-zA-Zа-яА-Я0-9_]/g, '');
-
+      const safeUsername = (tgUser.preferred_username || tgUser.name || `user_${tgUser.id}`).replace(/[^a-zA-Z0-9_]/g, '');
+      
       const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email,
         email_confirm: true,
-        user_metadata: { username: safeUsername, telegram_id: data.id }
+        user_metadata: { username: safeUsername, telegram_id: tgUser.id }
       });
 
       if (authError) throw authError;
       userId = authUser.user.id;
-
-      await supabaseAdmin.from('profiles').update({ telegram_id: data.id }).eq('id', userId);
+      await supabaseAdmin.from('profiles').update({ telegram_id: tgUser.id }).eq('id', userId);
     }
 
-    // Генерируем сессию (magic link)
+    // 4. Выдаем токен Supabase
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: 'magiclink',
-      email: `tg_${data.id}@namylimsya.local`,
+      email: email,
     });
 
     if (linkError) throw linkError;
@@ -84,8 +85,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(JSON.stringify({ error: message }), { 
+    return new Response(JSON.stringify({ error: error.message }), { 
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" } 
     });
