@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import Script from 'next/script';
 
 const TELEGRAM_BOT_USERNAME = 'namylimsya_bot';
 
@@ -22,15 +23,10 @@ function LoginForm() {
   const [message, setMessage] = useState('');
   const router = useRouter();
 
-  // Загрузка городов
   useEffect(() => {
-    supabase
-      .from('cities')
-      .select('name')
-      .order('name')
-      .then(({ data }) => {
-        if (data) setCities(data.map((c) => c.name));
-      });
+    supabase.from('cities').select('name').order('name').then(({ data }) => {
+      if (data) setCities(data.map((c) => c.name));
+    });
   }, []);
 
   useEffect(() => {
@@ -72,20 +68,6 @@ function LoginForm() {
       window.onTelegramAuth = undefined;
     };
   }, [router]);
-
-  const handleTgClick = () => {
-    if (!window.Telegram) {
-      alert('Скрипт Telegram еще загружается или заблокирован. Подождите пару секунд.');
-      return;
-    }
-    // Вызываем API Telegram. Передаем USERNAME (без @), а не числовой ID!
-    window.Telegram.Login.auth(
-      { bot_id: "8934385689", request_access: 'write' }, 
-      (user) => {
-        if (user) window.onTelegramAuth?.(user);
-      }
-    );
-  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,18 +125,20 @@ function LoginForm() {
         </div>
       )}
 
-      {/* Кастомная кнопка Telegram */}
+      {/* Официальная кнопка Telegram */}
       <div className="w-full flex flex-col items-center mb-6">
-        <button
-          type="button"
-          onClick={handleTgClick}
-          className="w-full bg-[#2AABEE] text-white font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-[#229ED9] transition-colors flex items-center justify-center gap-2"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.460-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
-          </svg>
-          Войти через Telegram
-        </button>
+        <div className="flex justify-center w-full min-h-[48px]">
+          <Script
+            id="telegram-widget"
+            src="https://telegram.org/js/telegram-widget.js?22"
+            strategy="lazyOnload"
+            data-telegram-login={TELEGRAM_BOT_USERNAME}
+            data-size="large"
+            data-radius="4"
+            data-onauth="onTelegramAuth(user)"
+            data-request-access="write"
+          />
+        </div>
 
         <div className="flex items-center gap-2 w-full mt-6">
           <div className="flex-1 h-px bg-brand-line/50"></div>
@@ -164,6 +148,7 @@ function LoginForm() {
       </div>
 
       <form onSubmit={handleAuth} className="flex flex-col gap-4">
+        {/* Твой код формы (инпуты email, пароля и т.д.) оставляем без изменений */}
         {!isLogin && (
           <div className="flex flex-col gap-1.5">
             <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш никнейм</label>
@@ -174,7 +159,6 @@ function LoginForm() {
               required
               minLength={3}
               maxLength={32}
-              placeholder="например: Вадим_Крутой"
               className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent"
             />
           </div>
