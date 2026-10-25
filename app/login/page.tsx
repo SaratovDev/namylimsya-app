@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import Script from 'next/script';
 
 function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
@@ -106,41 +107,51 @@ function LoginForm() {
         </div>
       )}
 
-      {/* Telegram Login Widget */}
+            {/* Telegram Login Widget */}
       <div className="flex flex-col items-center mb-6">
-        <div id="telegram-login-container"></div>
         
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.onTelegramAuth = function (user) {
-                fetch('${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/telegram-auth', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(user)
-                })
-                .then(res => res.json())
-                .then(data => {
-                  if (data.token) {
-                    // Входим через хэш-токен
-                    window.location.href = '/auth/callback?token=' + data.token;
-                  } else {
-                    alert('Ошибка входа');
-                  }
-                });
-              };
-            `
-          }}
-        />
-        
-        <script 
-          async 
+        {/* Скрипт для обработки колбэка от Telegram */}
+        <Script id="telegram-auth-handler" strategy="lazyOnload">
+          {`
+            window.onTelegramAuth = function (user) {
+              fetch('${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/telegram-auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(user)
+              })
+              .then(res => res.json())
+              .then(data => {
+                if (data.token) {
+                  window.location.href = '/auth/callback?token=' + data.token;
+                } else {
+                  alert('Ошибка входа');
+                  console.error(data);
+                }
+              })
+              .catch(err => {
+                alert('Ошибка сети');
+                console.error(err);
+              });
+            };
+          `}
+        </Script>
+
+        {/* Сам виджет Telegram */}
+        <Script 
           src="https://telegram.org/js/telegram-widget.js?22" 
-          data-telegram-login="namylimsya_bot" 
+          strategy="lazyOnload"
+          data-telegram-login="namylimsya" 
           data-size="large" 
           data-onauth="onTelegramAuth(user)" 
           data-request-access="write"
-        ></script>
+        />
+        
+        {/* Разделитель */}
+        <div className="flex items-center gap-2 w-full mt-6">
+          <div className="flex-1 h-px bg-brand-line/50"></div>
+          <span className="text-xs font-bold text-brand-muted uppercase">или по email</span>
+          <div className="flex-1 h-px bg-brand-line/50"></div>
+        </div>
       </div>
 
       <form onSubmit={handleAuth} className="flex flex-col gap-4">
@@ -243,6 +254,8 @@ function LoginForm() {
         >
           {loading ? 'Загрузка...' : (isLogin ? 'Войти' : 'Зарегистрироваться')}
         </button>
+
+
       </form>
 
       <div className="mt-6 text-center">
