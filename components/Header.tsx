@@ -101,19 +101,29 @@ export default function Header() {
   }, []);
 
   useEffect(() => {
-    if (user) {
-      supabase
-        .from('profiles')
-        .select('username')
-        .eq('id', user.id)
-        .maybeSingle()
-        .then(({ data }) => {
-          setUsername(data?.username || user.email?.split('@')[0] || 'Пользователь');
-        });
-    } else {
-      const timer = setTimeout(() => setUsername(null), 0);
-      return () => clearTimeout(timer);
-    }
+    const fetchProfile = () => {
+      if (user) {
+        supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', user.id)
+          .maybeSingle()
+          .then(({ data }) => {
+            setUsername(data?.username || user.email?.split('@')[0] || 'Пользователь');
+          });
+      } else {
+        setUsername(null);
+      }
+    };
+
+    fetchProfile();
+
+    // Слушаем кастомное событие смены профиля
+    window.addEventListener('profileUpdated', fetchProfile);
+
+    return () => {
+      window.removeEventListener('profileUpdated', fetchProfile);
+    };
   }, [user]);
 
   useEffect(() => {
