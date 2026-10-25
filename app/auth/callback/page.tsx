@@ -1,47 +1,26 @@
 'use client';
 
 import { useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 function CallbackHandler() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   useEffect(() => {
-    // 1. Проверяем старый метод (magic link)
-    const token = searchParams.get('token');
-    if (token) {
-      supabase.auth.verifyOtp({ token_hash: token, type: 'magiclink' })
-        .then(({ error }) => {
-          if (error) alert(error.message);
-          else router.push('/');
-        });
-      return;
-    }
-
-    // 2. Проверяем новый метод (OIDC code)
-    const code = searchParams.get('code');
-    if (code) {
-      fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/telegram-auth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code })
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (data.token) {
-          return supabase.auth.verifyOtp({ token_hash: data.token, type: 'magiclink' });
-        }
-        throw new Error(data.error || 'Ошибка сервера');
-      })
-      .then(({ error }) => {
-        if (error) alert(error.message);
-        else router.push('/');
-      })
-      .catch(err => alert(err.message));
-    }
-  }, [router, searchParams]);
+    // Supabase при OAuth сам перехватывает токен из URL (в hash-части)
+    // и сохраняет сессию в куки. Нам нужно просто дождаться этого.
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.error('Ошибка авторизации:', error);
+      }
+      
+      // В любом случае отправляем на главную. 
+      // Если сессия есть, router.refresh() обновит интерфейс.
+      router.push('/');
+      router.refresh();
+    });
+  }, [router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center">
@@ -54,7 +33,7 @@ function CallbackHandler() {
 
 export default function AuthCallback() {
   return (
-    <Suspense fallback={<div>Загрузка...</div>}>
+    <Suspense fallback={<div className="text-center font-bold">Загрузка...</div>}>
       <CallbackHandler />
     </Suspense>
   );
