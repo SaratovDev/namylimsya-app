@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
 import { useRouter } from 'next/navigation';
-const [usernameInput, setUsernameInput] = useState('');
+
 
 const INTERESTS_LIST = [
   'Спорт', 'Кино', 'Музыка', 'Игры', 'Книги', 'Фотография', 'Кулинария', 'Путешествия', 
@@ -13,6 +13,7 @@ const INTERESTS_LIST = [
 ];
 
 export default function SettingsPage() {
+  const [usernameInput, setUsernameInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 const [profile, setProfile] = useState<{ id: string; username: string } | null>(null);
