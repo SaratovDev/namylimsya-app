@@ -34,9 +34,9 @@ function LoginForm() {
     return () => clearTimeout(timer);
   }, [isRegisterMode]);
 
-  // === TELEGRAM LOGIN ===
+  // === TELEGRAM LOGIN (Глобальный колбэк) ===
   useEffect(() => {
-    const handleTelegramAuth = async (user: TelegramUser) => {
+    const handleTelegramAuth = async (user: any) => {
       setLoading(true);
       setMessage('Авторизация через Telegram...');
       try {
@@ -62,13 +62,14 @@ function LoginForm() {
       }
     };
 
-    window.onTelegramAuth = handleTelegramAuth;
+    (window as any).onTelegramAuth = handleTelegramAuth;
 
     return () => {
-      window.onTelegramAuth = undefined;
+      (window as any).onTelegramAuth = undefined;
     };
   }, [router]);
 
+  // === ОБРАБОТЧИК ВХОДА ПО EMAIL ===
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -125,30 +126,49 @@ function LoginForm() {
         </div>
       )}
 
-      {/* Официальная кнопка Telegram */}
+      {/* === КАСТОМНАЯ КНОПКА TELEGRAM === */}
       <div className="w-full flex flex-col items-center mb-6">
-        <div className="flex justify-center w-full min-h-[48px]">
-          <Script
-            id="telegram-widget"
-            src="https://telegram.org/js/telegram-widget.js?22"
-            strategy="lazyOnload"
-            data-telegram-login={TELEGRAM_BOT_USERNAME}
-            data-size="large"
-            data-radius="4"
-            data-onauth="onTelegramAuth(user)"
-            data-request-access="write"
-          />
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (!(window as any).Telegram) {
+              alert('Скрипт Telegram еще загружается. Подождите пару секунд и нажмите снова.');
+              return;
+            }
+            // Передаем ID как ЧИСЛО (без кавычек)
+            (window as any).Telegram.Login.auth(
+              { bot_id: 8934385689, request_access: 'write' },
+              (user: any) => {
+                if (user) {
+                  (window as any).onTelegramAuth?.(user);
+                }
+              }
+            );
+          }}
+          className="w-full bg-[#2AABEE] text-white font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-[#229ED9] transition-colors flex items-center justify-center gap-2"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.460-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+          </svg>
+          Войти через Telegram
+        </button>
+      </div>
 
-        <div className="flex items-center gap-2 w-full mt-6">
-          <div className="flex-1 h-px bg-brand-line/50"></div>
-          <span className="text-xs font-bold text-brand-muted uppercase">или по email</span>
-          <div className="flex-1 h-px bg-brand-line/50"></div>
-        </div>
+      {/* Скрытый скрипт для загрузки Telegram API */}
+      <div className="hidden">
+        <Script
+          src="https://telegram.org/js/telegram-widget.js?22"
+          strategy="afterInteractive"
+        />
+      </div>
+
+      <div className="flex items-center gap-2 w-full mb-6">
+        <div className="flex-1 h-px bg-brand-line/50"></div>
+        <span className="text-xs font-bold text-brand-muted uppercase">или по email</span>
+        <div className="flex-1 h-px bg-brand-line/50"></div>
       </div>
 
       <form onSubmit={handleAuth} className="flex flex-col gap-4">
-        {/* Твой код формы (инпуты email, пароля и т.д.) оставляем без изменений */}
         {!isLogin && (
           <div className="flex flex-col gap-1.5">
             <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш никнейм</label>
@@ -159,6 +179,7 @@ function LoginForm() {
               required
               minLength={3}
               maxLength={32}
+              placeholder="например: Вадим_Крутой"
               className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent"
             />
           </div>
