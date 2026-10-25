@@ -95,6 +95,27 @@ function LoginForm() {
     }
   };
   
+  useEffect(() => {
+    // Следим за появлением iframe от Telegram
+    const observer = new MutationObserver(() => {
+      const tgIframe = document.querySelector('iframe[src*="telegram.org"]');
+      const container = document.getElementById('telegram-widget-container');
+      
+      if (tgIframe && container && !container.contains(tgIframe)) {
+        // Как только Telegram создал iframe, перемещаем его в наш контейнер
+        container.appendChild(tgIframe);
+        // Сбрасываем позиционирование
+        (tgIframe as HTMLElement).style.position = 'static';
+        (tgIframe as HTMLElement).style.margin = '0 auto';
+        (tgIframe as HTMLElement).style.display = 'block';
+      }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8">
       <h1 className="text-2xl font-extrabold uppercase mb-6 text-center">
@@ -108,7 +129,7 @@ function LoginForm() {
       )}
 
 
-      {/* Telegram Login Widget */}
+       {/* Telegram Login Widget */}
       <div className="w-full flex flex-col items-center mb-6 relative">
         <Script id="telegram-auth-handler" strategy="lazyOnload">
           {`
@@ -131,20 +152,21 @@ function LoginForm() {
           `}
         </Script>
 
-        {/* Обертка для виджета */}
+        {/* Контейнер, куда мы будем перемещать iframe */}
         <div 
-          className="relative flex justify-center w-full h-[50px]" 
-          id="telegram-login-container"
-        >
-          <Script 
-            src="https://telegram.org/js/telegram-widget.js?22" 
-            strategy="lazyOnload"
-            data-telegram-login="namylimsya_bot" 
-            data-size="large" 
-            data-onauth="onTelegramAuth(user)" 
-            data-request-access="write"
-          />
-        </div>
+          id="telegram-widget-container" 
+          className="w-full flex justify-center h-[50px]"
+        ></div>
+
+        {/* Сам скрипт виджета */}
+        <Script 
+          src="https://telegram.org/js/telegram-widget.js?22" 
+          strategy="lazyOnload"
+          data-telegram-login="namylimsya_bot" 
+          data-size="large" 
+          data-onauth="onTelegramAuth(user)" 
+          data-request-access="write"
+        />
       </div>
 
       <form onSubmit={handleAuth} className="flex flex-col gap-4">
