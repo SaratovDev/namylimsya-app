@@ -5,7 +5,7 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": ["deno.window"],
+    "types": ["deno.window", "deno.ns"],
     "strict": true
   }
 }

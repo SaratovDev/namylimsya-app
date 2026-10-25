@@ -1,6 +1,6 @@
 # Project bundle
 
-Generated: 2026-10-24 16:23
+Generated: 2026-10-25 09:10
 Root: C:\Users\Lenovo\Downloads\event_mp\namylimsya-app
 
 ## Tree
@@ -22,8 +22,12 @@ namylimsya-app/
 |   |   |   \-- p
 |   |   |-- layout.tsx
 |   |   \-- page.tsx
+|   |-- api/
+|   |   \-- e
 |   |-- archive/
 |   |   \-- p
+|   |-- auth/
+|   |   \-- c
 |   |-- banned/
 |   |   \-- p
 |   |-- event/
@@ -68,6 +72,7 @@ namylimsya-app/
 |   |-- EventChat.tsx
 |   |-- EventList.tsx
 |   |-- Header.tsx
+|   |-- InfiniteEventList.tsx
 |   |-- Map.tsx
 |   |-- MapComponent.tsx
 |   |-- MapPicker.tsx
@@ -94,6 +99,20 @@ namylimsya-app/
 |   |-- next.svg
 |   |-- vercel.svg
 |   \-- window.svg
+|-- supabase/
+|   |-- .temp/
+|   |   |-- cli-latest
+|   |   |-- gotrue-version
+|   |   |-- linked-project.json
+|   |   |-- pooler-url
+|   |   |-- postgres-version
+|   |   |-- project-ref
+|   |   |-- rest-version
+|   |   |-- storage-migration
+|   |   \-- storage-version
+|   |-- functions/
+|   |   \-- t
+|   \-- config.toml
 |-- tools/
 |   |-- bundle-project.ps1
 |   |-- bundle-security-md.ps1
@@ -103,6 +122,7 @@ namylimsya-app/
 |-- AGENTS.md
 |-- bundle-project.ps1
 |-- eslint.config.mjs
+|-- global.d.ts
 |-- next.config.ts
 |-- package.json
 |-- postcss.config.mjs
@@ -253,9 +273,9 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
 
   const isOwnProfile = user?.id === profile.id;
   const isFemale = profile.gender === 'female';
-  const genderSuffix = isFemale ? 'а' : ''; // Для "организовалА" и "посетилА"
+  const genderSuffix = isFemale ? 'а' : ''; 
 
-  // 2. Получаем рейтинг организатора
+  // 2. Получаем рейтинг
   const { data: ratingData } = await supabase
     .rpc('get_organizer_rating', { org_id: profile.id })
     .single<{ average_rating: number; total_reviews: number }>();
@@ -266,7 +286,6 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
   // 3. Получаем статистику (только ПРОШЕДШИЕ события)
   const now = new Date().toISOString();
   
-  // Успешно организовал (события, которые прошли и не были отменены)
   const { count: eventsOrganized } = await supabase
     .from('events')
     .select('*', { count: 'exact', head: true })
@@ -274,8 +293,6 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
     .lt('date_time', now)
     .eq('status', 'active');
 
-  // Успешно посетил (заявки approved на события, которые прошли)
-  // Сначала получаем ID событий, на которые он подтвержден
   const { data: approvedApps } = await supabase
     .from('applications')
     .select('event_id')
@@ -295,21 +312,24 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
     eventsAttended = count || 0;
   }
 
-    // Определяем бейджи
+  // 4. Определяем бейджи
   const orgBadgeData = getBadgeStatus(eventsOrganized || 0, ORGANIZER_BADGES);
   const partBadgeData = getBadgeStatus(eventsAttended || 0, PARTICIPANT_BADGES);
 
-  // Собираем массив для отображения (только текущие бейджи)
   const displayBadges = [];
-  if (orgBadgeData.current) displayBadges.push({ ...orgBadgeData.current, type: 'organizer', progress: orgBadgeData.progress, next: orgBadgeData.next });
-  if (partBadgeData.current) displayBadges.push({ ...partBadgeData.current, type: 'participant', progress: partBadgeData.progress, next: partBadgeData.next });
+  if (orgBadgeData.current) {
+    displayBadges.push({ ...orgBadgeData.current, current: orgBadgeData.current, type: 'organizer', progress: orgBadgeData.progress, next: orgBadgeData.next });
+  }
+  if (partBadgeData.current) {
+    displayBadges.push({ ...partBadgeData.current, current: partBadgeData.current, type: 'participant', progress: partBadgeData.progress, next: partBadgeData.next });
+  }
 
-  // 4. Получаем безопасные DTO событий для отображения внизу
+  // 5. Получаем события
   const viewer = await getViewer(supabase);
   const { items: allEvents } = await getEventListDTOs(supabase, viewer, 1000, 0);
   const userEvents = allEvents.filter(e => e.organizerId === profile.id);
 
-  // 5. Получаем последние 5 отзывов
+  // 6. Получаем отзывы
   const { data: recentReviews } = await supabase
     .from('reviews')
     .select(`
@@ -328,219 +348,235 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
   return (
     <main className="max-w-[1100px] mx-auto px-4 md:px-6 py-10 min-h-screen">
       
-      {/* Сетка: Левая часть (Инфо) и Правая (Статистика) */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 mb-10">
+      {/* ЕДИНАЯ СЕТКА */}
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] lg:grid-cols-[1fr_350px] gap-6 items-start">
         
-        {/* === ЛЕВАЯ КОЛОНКА: ОСНОВНАЯ ИНФО === */}
-        <div className="bg-brand-surface border border-brand-line rounded-brand-lg p-6 md:p-8">
-          <div className="flex flex-col md:flex-row gap-6 md:gap-8 items-center md:items-start">
-            
-            {/* Аватар и награды */}
-            <div className="flex flex-col items-center gap-4 shrink-0">
-              <div className={`w-32 h-32 rounded-full border-4 flex items-center justify-center text-5xl font-extrabold overflow-hidden
-                ${profile.gender === 'male' ? 'bg-blue-100 text-blue-800 border-blue-400' : 
-                  profile.gender === 'female' ? 'bg-pink-100 text-pink-800 border-pink-400' : 
-                  'bg-gray-200 text-gray-700 border-brand-line'}
-              `}>
-                {profile.avatar_url ? (
-                  <Image src={profile.avatar_url} alt={profile.username} width={128} height={128} className="w-16 h-20 object-cover" />
-                ) : (
-                  avatarLetter
-                )}
-              </div>
+        {/* ЛЕВАЯ КОЛОНКА (Инфо + События) */}
+        <div className="flex flex-col gap-6">
+          
+          {/* Карточка с инфо */}
+          <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 md:p-8">
+            <div className="flex flex-col md:flex-row gap-6 md:gap-8 items-center md:items-start">
               
-              {isOwnProfile && (
-                <AvatarPicker 
-                  currentAvatar={profile.avatar_url} 
-                  gender={profile.gender} 
-                  username={profile.username} 
-                  userId={profile.id} 
-                />
-              )}
-
-              {/* Секция "Награды и бейджи" */}
-              <div className="w-full mt-4 text-center border-t-2 border-brand-line pt-4">
-                <h3 className="text-[10px] font-extrabold uppercase text-brand-muted mb-3">Награды</h3>
-                
-                <div className="flex justify-center gap-4">
-                  {displayBadges.length === 0 && (
-                    <p className="text-xs font-bold text-brand-muted">Пока нет наград</p>
+              {/* Аватар */}
+              <div className="flex flex-col items-center gap-4 shrink-0">
+                <div className={`w-32 h-32 rounded-full border-4 flex items-center justify-center text-5xl font-extrabold overflow-hidden
+                  ${profile.gender === 'male' ? 'bg-blue-100 text-blue-800 border-blue-400' : 
+                    profile.gender === 'female' ? 'bg-pink-100 text-pink-800 border-pink-400' : 
+                    'bg-gray-200 text-gray-700 border-brand-line'}
+                `}>
+                  {profile.avatar_url ? (
+                    <Image src={profile.avatar_url} alt={profile.username} width={128} height={128} className="w-[90%] h-[90%] object-cover" />
+                  ) : (
+                    avatarLetter
                   )}
-
-                  {displayBadges.map((badge, idx) => {
-                    // Считаем, сколько именно шагов осталось до следующего звания
-                    const stepsLeft = badge.next ? badge.next.threshold - (badge.current?.threshold || 0) - Math.round(((badge.progress / 100) * (badge.next.threshold - (badge.current?.threshold || 0)))) : 0;
-                    
-                    return (
-                      <div key={idx} className="flex flex-col items-center group relative">
-
-                        {/* Прямоугольная медаль */}
-                        <div className={`w-16 h-32 sm:w-20 sm:h-36 rounded-[102px] flex items-center justify-center bg-brand-bg relative overflow-hidden ${badge.color}`}>
-                          <Image 
-                            src={badge.icon} 
-                            alt={badge.title} 
-                            width={80} 
-                            height={96} 
-                            className="w-full h-full object-cover z-10"
-                          />
-                        </div>
-
-                        {/* Тултип с названием и точным прогрессом */}
-                        <div className="absolute top-full mt-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none flex flex-col items-center w-max">
-                          <div className="w-2 h-2 bg-brand-text rotate-45 -mb-1"></div>
-                          <div className="bg-brand-text text-brand-bg text-[10px] font-bold px-2 py-1 rounded text-center whitespace-nowrap">
-                            <div>{badge.title}</div>
-                            {badge.next && (
-                              <div className="text-[9px] font-normal text-brand-bg/80 mt-0.5 border-t border-brand-bg/20 pt-0.5">
-                                Осталось {stepsLeft} до «{badge.next.title}»
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
                 </div>
-
-                {/* Плашка проверенного организатора */}
-                {profile.is_verified && (
-                  <div className="mt-4 flex items-center justify-center gap-1 text-[10px] font-bold text-blue-600">
-                    <span>✔</span> Проверенный организатор
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Текстовая инфа */}
-            <div className="flex-1 flex flex-col gap-4 text-center md:text-left">
-              
-              <div className="flex flex-col md:flex-row md:items-center gap-3 border-b-2 border-dashed border-brand-line pb-3">
-                <h1 className="text-3xl md:text-4xl font-extrabold uppercase flex items-center justify-center md:justify-start gap-2">
-                  @{profile.username}
-                  {genderIcon && <span className="text-brand-accent text-2xl">{genderIcon}</span>}
-                </h1>
                 
                 {isOwnProfile && (
-                  <Link 
-                    href="/settings" 
-                    className="bg-brand-bg border-2 border-brand-line rounded-brand px-3 py-1 text-xs font-extrabold uppercase hover:bg-brand-surface transition-colors mx-auto md:mx-0 w-fit"
-                  >
-                    Редактировать
-                  </Link>
+                  <AvatarPicker 
+                    currentAvatar={profile.avatar_url} 
+                    gender={profile.gender} 
+                    username={profile.username} 
+                    userId={profile.id} 
+                  />
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 text-sm font-bold text-brand-muted">
-                <span>{genderText}</span>
-                {profile.age && <span>• {profile.age} лет</span>}
-                {profile.city && <span>• {profile.city}</span>}
-              </div>
+              {/* Текстовая инфа */}
+              <div className="flex-1 flex flex-col gap-4 text-center md:text-left">
+                <div className="flex flex-col md:flex-row md:items-center gap-3 border-b-2 border-dashed border-brand-line pb-3">
+                  <h1 className="text-3xl md:text-4xl font-extrabold uppercase flex items-center justify-center md:justify-start gap-2">
+                    @{profile.username}
+                    {genderIcon && <span className="text-brand-accent text-2xl">{genderIcon}</span>}
+                    {profile.is_verified && (
+                      <span title="Проверенный организатор" className="text-blue-500 text-xl">✔</span>
+                    )}
+                  </h1>
+                  
+                  {isOwnProfile && (
+                    <Link 
+                      href="/settings" 
+                      className="bg-brand-bg border-2 border-brand-line rounded-brand px-3 py-1 text-xs font-extrabold uppercase hover:bg-brand-surface transition-colors mx-auto md:mx-0 w-fit"
+                    >
+                      Редактировать
+                    </Link>
+                  )}
+                </div>
 
-              {/* Соцсети */}
-              <div className="flex flex-wrap justify-center md:justify-start gap-3">
-                {profile.telegram && (
-                  <a href={`https://t.me/${profile.telegram.replace('@', '')}`} target="_blank" className="text-xs font-bold bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition-colors">
-                    Telegram: @{profile.telegram.replace('@', '')}
-                  </a>
-                )}
-                {profile.vk && (
-                  <a href={`https://vk.com/${profile.vk}`} target="_blank" className="text-xs font-bold bg-blue-50 text-blue-800 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition-colors">
-                    VK
-                  </a>
-                )}
-              </div>
+                <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 text-sm font-bold text-brand-muted">
+                  <span>{genderText}</span>
+                  {profile.age && <span>• {profile.age} лет</span>}
+                  {profile.city && <span>• {profile.city}</span>}
+                </div>
 
-              <div className="mt-2">
-                <h3 className="text-xs font-extrabold uppercase text-brand-muted mb-1">О себе</h3>
-                {profile.bio ? (
-                  <p className="text-sm font-medium whitespace-pre-wrap leading-relaxed">{profile.bio}</p>
-                ) : (
-                  <p className="text-sm font-bold text-brand-muted italic">Пользователь пока ничего не рассказал о себе.</p>
-                )}
-              </div>
+                <div className="flex flex-wrap justify-center md:justify-start gap-3">
+                  {profile.telegram && (
+                    <a href={`https://t.me/${profile.telegram.replace('@', '')}`} target="_blank" className="text-xs font-bold bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition-colors">
+                      Telegram: @{profile.telegram.replace('@', '')}
+                    </a>
+                  )}
+                  {profile.vk && (
+                    <a href={`https://vk.com/${profile.vk}`} target="_blank" className="text-xs font-bold bg-blue-50 text-blue-800 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition-colors">
+                      VK
+                    </a>
+                  )}
+                </div>
 
-              {profile.interests && profile.interests.length > 0 && (
                 <div className="mt-2">
-                  <h3 className="text-xs font-extrabold uppercase text-brand-muted mb-2">Увлечения</h3>
-                  <div className="flex flex-wrap justify-center md:justify-start gap-2">
-                    {profile.interests.map((interest: string) => (
-                      <span key={interest} className="bg-brand-cat-soft text-brand-cat font-bold text-xs px-3 py-1 rounded-full border border-brand-cat/30">
-                        {interest}
-                      </span>
-                    ))}
+                  <h3 className="text-xs font-extrabold uppercase text-brand-muted mb-1">О себе</h3>
+                  {profile.bio ? (
+                    <p className="text-sm font-medium whitespace-pre-wrap leading-relaxed">{profile.bio}</p>
+                  ) : (
+                    <p className="text-sm font-bold text-brand-muted italic">Пользователь пока ничего не рассказал о себе.</p>
+                  )}
+                </div>
+
+                {profile.interests && profile.interests.length > 0 && (
+                  <div className="mt-2">
+                    <h3 className="text-xs font-extrabold uppercase text-brand-muted mb-2">Увлечения</h3>
+                    <div className="flex flex-wrap justify-center md:justify-start gap-2">
+                      {profile.interests.map((interest: string) => (
+                        <span key={interest} className="bg-brand-cat-soft text-brand-cat font-bold text-xs px-3 py-1 rounded-full border border-brand-cat/30">
+                          {interest}
+                        </span>
+                      ))}
+                    </div>
                   </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Созданные события */}
+          <div>
+            <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Созданные события</h2>
+            <div className="flex flex-col gap-6">
+              {userEvents.length === 0 ? (
+                <p className="text-brand-muted font-bold">Этот пользователь пока не создавал событий.</p>
+              ) : (
+                userEvents.map((item) => (
+                  <EventCard key={item.id} item={item} />
+                ))
+              )}
+            </div>
+          </div>
+
+        </div>
+
+        {/* ПРАВАЯ КОЛОНКА (Статистика + Награды + Отзывы) */}
+        <div className="flex flex-col gap-6">
+          
+          {/* Статистика */}
+          <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
+            <h2 className="text-lg font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Статистика</h2>
+            <div className="flex flex-col gap-4">
+              <div className="bg-brand-bg p-3 rounded-brand border border-brand-line flex flex-col items-center text-center">
+                <span className="text-3xl font-extrabold text-brand-accent">{eventsOrganized || 0}</span>
+                <span className="text-xs font-bold text-brand-muted uppercase mt-1">Успешно организовал{genderSuffix}</span>
+              </div>
+              <div className="bg-brand-bg p-3 rounded-brand border border-brand-line flex flex-col items-center text-center">
+                <span className="text-3xl font-extrabold text-green-600">{eventsAttended || 0}</span>
+                <span className="text-xs font-bold text-brand-muted uppercase mt-1">Успешно посетил{genderSuffix}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Награды */}
+          <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6">
+            <h2 className="text-lg font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Награды</h2>
+            
+            <div className="grid grid-cols-2 gap-4 max-w-[200px] mx-auto">
+              {displayBadges.find(b => b.type === 'organizer') ? (() => {
+                const badge = displayBadges.find(b => b.type === 'organizer')!;
+                return (
+                  <div className="flex flex-col items-center group relative">
+                    <div className={`w-full aspect-[4/7] rounded-[99px] border-2 flex items-center justify-center bg-brand-bg relative overflow-hidden ${badge.color}`}>
+                      <Image src={badge.icon} alt={badge.title} width={100} height={125} className="w-full h-full object-cover z-10" />
+                    </div>
+                    <div className="absolute top-full mt-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none flex flex-col items-center w-max">
+                      <div className="w-2 h-2 bg-brand-text rotate-45 -mb-1"></div>
+                      <div className="bg-brand-text text-brand-bg text-[10px] font-bold px-2 py-1 rounded text-center whitespace-nowrap">
+                        <div>{badge.title}</div>
+                        <div className="text-[9px] font-normal text-brand-bg/80 mt-0.5 border-t border-brand-bg/20 pt-0.5">Организатор</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })() : (
+                <div className="flex flex-col items-center justify-center w-full aspect-[4/7] rounded-[99px] border-2 border-dashed border-brand-line/50 bg-brand-bg/50">
+                  <span className="text-2xl opacity-20">🔒</span>
                 </div>
               )}
 
-            </div>
-          </div>
-        </div>
-
-        {/* === ПРАВАЯ КОЛОНКА: СТАТИСТИКА === */}
-        <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-6 h-fit sticky top-24">
-          <h2 className="text-lg font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Статистика</h2>
-          
-          <div className="flex flex-col gap-4">
-            <div className="bg-brand-bg p-3 rounded-brand border border-brand-line flex flex-col items-center text-center">
-              <span className="text-3xl font-extrabold text-brand-accent">{eventsOrganized || 0}</span>
-              <span className="text-xs font-bold text-brand-muted uppercase mt-1">Успешно организовал{genderSuffix}</span>
-            </div>
-            
-            <div className="bg-brand-bg p-3 rounded-brand border border-brand-line flex flex-col items-center text-center">
-              <span className="text-3xl font-extrabold text-green-600">{eventsAttended || 0}</span>
-              <span className="text-xs font-bold text-brand-muted uppercase mt-1">Успешно посетил{genderSuffix}</span>
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      {/* === НИЖНЯЯ ЧАСТЬ: СОБЫТИЯ И ОТЗЫВЫ === */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
-        
-        {/* Созданные события */}
-        <div>
-          <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Созданные события</h2>
-          <div className="flex flex-col gap-6">
-            {userEvents.length === 0 ? (
-              <p className="text-brand-muted font-bold">Этот пользователь пока не создавал событий.</p>
-            ) : (
-              userEvents.map((item) => (
-                <EventCard key={item.id} item={item} />
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Отзывы */}
-        <div className="sticky top-24 h-fit">
-          <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Отзывы</h2>
-          <div className="flex flex-col gap-4">
-            {recentReviews && recentReviews.length > 0 ? (
-              recentReviews.map((review: any) => {
-                const event = Array.isArray(review.events) ? review.events[0] : review.events;
-                const author = Array.isArray(review.author) ? review.author[0] : review.author;
-                
-                return (
-                  <div key={review.id} className="bg-brand-surface border-2 border-brand-line rounded-brand p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-bold text-sm">@{author?.username || 'Пользователь'}</span>
-                      <div className="flex text-yellow-500 text-sm">
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <span key={i}>{i < review.rating ? '★' : '☆'}</span>
-                        ))}
+              {displayBadges.find(b => b.type === 'participant') ? (() => {
+                const badge = displayBadges.find(b => b.type === 'participant')!;
+                 return (
+                  <div className="flex flex-col items-center group relative">
+                    <div className={`w-full aspect-[4/7] rounded-[99px] border-2 flex items-center justify-center bg-brand-bg relative overflow-hidden ${badge.color}`}>
+                      <Image src={badge.icon} alt={badge.title} width={100} height={125} className="w-full h-full object-cover z-10" />
+                    </div>
+                    <div className="absolute top-full mt-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none flex flex-col items-center w-max">
+                      <div className="w-2 h-2 bg-brand-text rotate-45 -mb-1"></div>
+                      <div className="bg-brand-text text-brand-bg text-[10px] font-bold px-2 py-1 rounded text-center whitespace-nowrap">
+                        <div>{badge.title}</div>
+                        <div className="text-[9px] font-normal text-brand-bg/80 mt-0.5 border-t border-brand-bg/20 pt-0.5">Участник</div>
                       </div>
                     </div>
-                    {event && <div className="text-[11px] text-brand-muted font-bold mb-2 uppercase">Событие: {event.title}</div>}
-                    {review.comment && <p className="text-sm italic text-brand-text/80">&quot;{review.comment}&quot;</p>}
                   </div>
                 );
-              })
-            ) : (
-              <p className="text-sm font-bold text-brand-muted bg-brand-surface border-2 border-brand-line rounded p-4 text-center">Отзывов пока нет.</p>
-            )}
+              })() : (
+                <div className="flex flex-col items-center justify-center w-full aspect-[4/7] rounded-[99px] border-2 border-dashed border-brand-line/50 bg-brand-bg/50">
+                  <span className="text-2xl opacity-20">🔒</span>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 text-center">
+               {reviewsCount >= 3 ? (
+                  <div className="inline-flex items-center gap-1.5 text-yellow-600 text-xs font-bold">
+                    <span className="text-lg leading-none">★</span>
+                    <span>{rating} / 5 ({reviewsCount} отзывов)</span>
+                  </div>
+                ) : (
+                  <div className="text-[10px] font-bold text-brand-muted">
+                    (Рейтинга пока нет)
+                  </div>
+                )}
+            </div>
           </div>
+
+          {/* Отзывы */}
+          <div>
+            <h2 className="text-xl font-extrabold uppercase mb-4 border-b-2 border-brand-line pb-2">Отзывы</h2>
+            <div className="flex flex-col gap-4">
+              {recentReviews && recentReviews.length > 0 ? (
+                recentReviews.map((review: any) => {
+                  const event = Array.isArray(review.events) ? review.events[0] : review.events;
+                  const author = Array.isArray(review.author) ? review.author[0] : review.author;
+                  
+                  return (
+                    <div key={review.id} className="bg-brand-surface border-2 border-brand-line rounded-brand p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-bold text-sm">@{author?.username || 'Пользователь'}</span>
+                        <div className="flex text-yellow-500 text-sm">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <span key={i}>{i < review.rating ? '★' : '☆'}</span>
+                          ))}
+                        </div>
+                      </div>
+                      {event && <div className="text-[11px] text-brand-muted font-bold mb-2 uppercase">Событие: {event.title}</div>}
+                      {review.comment && <p className="text-sm italic text-brand-text/80">&quot;{review.comment}&quot;</p>}
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-sm font-bold text-brand-muted bg-brand-surface border-2 border-brand-line rounded p-4 text-center">Отзывов пока нет.</p>
+              )}
+            </div>
+          </div>
+
         </div>
+
       </div>
 
     </main>
@@ -1609,6 +1645,43 @@ export default async function AdminUsersPage() {
 }
 ````
 
+### `app/api/events/route.ts`
+
+``ts
+import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase-server';
+import { getViewer } from '@/lib/event-access';
+import { getEventListDTOs } from '@/lib/event-queries';
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const page = Number(searchParams.get('page')) || 1;
+  const category = searchParams.get('category') || undefined;
+  const dateFrom = searchParams.get('date_from') || undefined;
+  const dateTo = searchParams.get('date_to') || undefined;
+  const city = searchParams.get('city') || undefined; // <--- 1. ЧИТАЕМ ГОРОД
+
+  const limit = 10;
+  const offset = (page - 1) * limit;
+
+  const supabase = await createClient();
+  const viewer = await getViewer(supabase);
+
+  try {
+    const result = await getEventListDTOs(supabase, viewer, limit, offset, false, {
+      category,
+      dateFrom,
+      dateTo,
+      city // <--- 2. ПЕРЕДАЕМ ГОРОД
+    });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    // ...
+  }
+}
+````
+
 ### `app/archive/page.tsx`
 
 ``tsx
@@ -1668,6 +1741,47 @@ export default async function ArchivePage({
         </div>
       )}
     </main>
+  );
+}
+````
+
+### `app/auth/callback/page.tsx`
+
+``tsx
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+
+export default function AuthCallback() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const token = searchParams.get('token');
+    
+    if (token) {
+      // Входим по хэш-токену
+      supabase.auth.verifyOtp({ token_hash: token, type: 'magiclink' })
+        .then(({ error }) => {
+          if (error) alert(error.message);
+          else router.push('/');
+        });
+    } else {
+      // Обычный OAuth (VK/Google)
+      supabase.auth.getSession().then(() => {
+        router.push('/');
+      });
+    }
+  }, [router, searchParams]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center font-bold text-brand-muted">
+        Авторизация... Пожалуйста, подождите.
+      </div>
+    </div>
   );
 }
 ````
@@ -2345,6 +2459,13 @@ details > summary::-webkit-details-marker {
 .animate-fade-in-up {
   animation: fade-in-up 0.3s ease-out forwards;
 }
+
+/* Фикс для Telegram Login Widget */
+iframe[src*="telegram.org"] {
+  position: static !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
 ````
 
 ### `app/layout.tsx`
@@ -2394,7 +2515,7 @@ export default function RootLayout({
           {children}
         </PageTransition>
 
-          <footer className="max-w-[1200px] w-full mx-auto mt-auto px-6 py-5 text-brand-muted text-[13px] border-t-2 border-brand-line flex justify-between items-center">
+          <footer className="max-w-[1100px] w-full mx-auto mt-20 px-6 py-5 text-brand-muted text-[13px] border-t-2 border-brand-line flex justify-between items-center">
           <div>
             <p>«Намылимся.» — площадка для живых встреч. Ответственность за проведение событий лежат на организаторах и участниках.</p>
             <p>16+ · Правила сообщества · <Link href="/support" className="hover:text-brand-accent transition-colors">Написать в поддержку</Link></p>
@@ -2429,6 +2550,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import Script from 'next/script';
 
 function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
@@ -2519,6 +2641,27 @@ function LoginForm() {
     }
   };
   
+  useEffect(() => {
+    // Следим за появлением iframe от Telegram
+    const observer = new MutationObserver(() => {
+      const tgIframe = document.querySelector('iframe[src*="telegram.org"]');
+      const container = document.getElementById('telegram-widget-container');
+      
+      if (tgIframe && container && !container.contains(tgIframe)) {
+        // Как только Telegram создал iframe, перемещаем его в наш контейнер
+        container.appendChild(tgIframe);
+        // Сбрасываем позиционирование
+        (tgIframe as HTMLElement).style.position = 'static';
+        (tgIframe as HTMLElement).style.margin = '0 auto';
+        (tgIframe as HTMLElement).style.display = 'block';
+      }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-8">
       <h1 className="text-2xl font-extrabold uppercase mb-6 text-center">
@@ -2526,10 +2669,75 @@ function LoginForm() {
       </h1>
 
       {message && (
-        <div className="mb-4 p-3 bg-brand-bg border-2 border-brand-line rounded-brand text-sm font-bold text-center">
+        <div className="mb-4 p-3 bg-brand-bg  rounded-brand text-sm font-bold text-center">
           {message}
         </div>
       )}
+
+   {/* Telegram Login Widget */}
+      <div className="w-full flex flex-col items-center mb-6 relative">
+        <Script id="telegram-auth-handler" strategy="lazyOnload">
+          {`
+            window.onTelegramAuth = function (user) {
+              fetch('${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/telegram-auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(user)
+              })
+              .then(res => res.json())
+              .then(data => {
+                if (data.token) {
+                  window.location.href = '/auth/callback?token=' + data.token;
+                } else {
+                  alert('Ошибка входа');
+                }
+              });
+            };
+          `}
+        </Script>
+
+        {/* Кастомная кнопка */}
+        <button
+          type="button"
+          onClick={() => {
+            // @ts-expect-ignore
+            if (window.Telegram) {
+              // Вызываем окно авторизации Telegram
+              // @ts-expect-ignore
+              window.Telegram.Login.auth({ bot_id: '8934385689', request_access: 'write' }, (user: unknown) => {
+                if (user) {
+                  // @ts-expect-ignore
+                  window.onTelegramAuth(user);
+                }
+              });
+            } else {
+              alert('Telegram скрипт еще загружается, подождите пару секунд...');
+            }
+          }}
+          className="w-full bg-[#2AABEE] text-white font-extrabold text-sm uppercase px-6 py-3.5  border-brand-line rounded-brand hover:bg-[#229ED9] transition-colors flex items-center justify-center gap-2"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+          Войти через Telegram
+        </button>
+        
+        {/* Скрытый виджет Telegram (он нужен только для загрузки API) */}
+        <div id="telegram-widget-container" className="hidden">
+          <Script 
+            src="https://telegram.org/js/telegram-widget.js?22" 
+            strategy="lazyOnload"
+            data-telegram-login="namylimsya_bot" 
+            data-size="large" 
+            data-onauth="onTelegramAuth(user)" 
+            data-request-access="write"
+          />
+        </div>
+        
+        <div className="flex items-center gap-2 w-full mt-6">
+          <div className="flex-1 h-px bg-brand-line/50"></div>
+          <span className="text-xs font-bold text-brand-muted uppercase">или по email</span>
+          <div className="flex-1 h-px bg-brand-line/50"></div>
+        </div>
+      </div>
 
       <form onSubmit={handleAuth} className="flex flex-col gap-4">
         
@@ -2631,6 +2839,8 @@ function LoginForm() {
         >
           {loading ? 'Загрузка...' : (isLogin ? 'Войти' : 'Зарегистрироваться')}
         </button>
+
+
       </form>
 
       <div className="mt-6 text-center">
@@ -2793,7 +3003,7 @@ export default async function MyEventsPage() {
   }, {} as Record<string, ApplicationType[]>);
 
   return (
-    <main className="max-w-[1200px] mx-auto px-4 md:px-6 py-10 min-h-screen">
+    <main className="max-w-[1100px] mx-auto px-4 md:px-6 py-10 min-h-screen">
       <h1 className="text-3xl font-extrabold uppercase mb-8 border-b-2 border-brand-line pb-4">
         Мои события и заявки
       </h1>
@@ -3057,13 +3267,14 @@ function EventSkeleton() {
 export default function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string, category?: string, date_from?: string, date_to?: string }>;
 }) {
   return (
     <main className="max-w-[1100px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-8 items-start mt-6 px-4 md:px-6 pb-12 relative">
       
       <div className="flex flex-col gap-6">
         
+        {/* ВОЗВРАЩАЕМ ФОРМУ СОЗДАНИЯ */}
         <details className="bg-brand-surface border-2 border-brand-line rounded-brand-lg overflow-hidden group">
           <summary className="list-none cursor-pointer flex items-center gap-3 p-5 font-extrabold text-lg uppercase hover:bg-brand-bg/50 transition-colors">
             <span className="w-7 h-7 flex items-center justify-center border-2 border-brand-line rounded-full bg-brand-accent text-brand-accent-ink text-xl leading-none group-open:rotate-45 transition-transform duration-300">+</span>
@@ -3087,9 +3298,10 @@ export default function Home({
       </div>
 
       <div className="hidden lg:block">
-        <Sidebar />
+        <Suspense fallback={<div className="h-40 bg-brand-surface animate-pulse rounded" />}>
+          <Sidebar />
+        </Suspense>
       </div>
-
     </main>
   );
 }
@@ -5568,28 +5780,37 @@ export default function EventChat({ eventId, currentUserId }: EventChatProps) {
 
 ``tsx
 // components/EventList.tsx
-import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getViewer } from '@/lib/event-access';
 import { getEventListDTOs } from '@/lib/event-queries';
-import EventCard from './EventCard';
+import InfiniteEventList from './InfiniteEventList';
 
 export default async function EventList({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+   searchParams: Promise<{ page?: string, category?: string, date_from?: string, date_to?: string, city?: string }>;
 }) {
   const params = await searchParams;
-  const currentPage = Number(params.page) || 1;
-  const limit = 10; // Сколько грузим за раз
-  const offset = (currentPage - 1) * limit;
+  const category = params.category;
+  const dateFrom = params.date_from;
+  const dateTo = params.date_to;
+  const city = params.city;
+  
+  // Всегда грузим только первую страницу на сервере
+  const limit = 10;
+  const offset = 0;
 
   const supabase = await createClient();
   const viewer = await getViewer(supabase);
 
   let result;
   try {
-    result = await getEventListDTOs(supabase, viewer, limit, offset);
+    result = await getEventListDTOs(supabase, viewer, limit, offset, false, {
+      category,
+      dateFrom,
+      dateTo,
+      city
+    });
   } catch (error) {
     console.error('ОШИБКА БАЗЫ:', error);
     return (
@@ -5599,33 +5820,12 @@ export default async function EventList({
     );
   }
 
-  const { items, total } = result;
-  const hasMore = offset + items.length < total;
-
-  if (items.length === 0 && currentPage === 1) {
-    return (
-      <div className="text-center py-10 border-2 border-dashed border-brand-line rounded-brand-lg text-brand-muted font-bold">
-        Пока нет событий. Станьте первым организатором!
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-6 items-center w-full">
-      {items.map((item) => (
-        <EventCard key={item.id} item={item} />
-      ))}
-      
-      {/* Кнопка "Показать ещё" */}
-      {hasMore && (
-        <Link
-          href={`/?page=${currentPage + 1}`}
-          className="mt-4 px-6 py-3 bg-brand-surface border-2 border-brand-line rounded-brand font-extrabold uppercase hover:bg-brand-bg transition-colors"
-        >
-          Показать ещё
-        </Link>
-      )}
-    </div>
+    <InfiniteEventList 
+      initialItems={result.items} 
+      initialTotal={result.total} 
+      filters={{ category, dateFrom, dateTo, city }} 
+    />
   );
 }
 ````
@@ -5956,6 +6156,130 @@ export default function Header() {
         </div>
       </div>
     </>
+  );
+}
+````
+
+### `components/InfiniteEventList.tsx`
+
+``tsx
+'use client';
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import EventCard from './EventCard';
+import { EventListItemDTO } from '@/lib/event-dto';
+
+interface InfiniteEventListProps {
+  initialItems: EventListItemDTO[];
+  initialTotal: number;
+  filters: { category?: string; dateFrom?: string; dateTo?: string; city?: string };
+}
+
+export default function InfiniteEventList({ initialItems, initialTotal, filters }: InfiniteEventListProps) {
+  const [items, setItems] = useState<EventListItemDTO[]>(initialItems);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(initialItems.length < initialTotal);
+  
+  const observerTarget = useRef<HTMLDivElement>(null);
+
+  // Функция подгрузки
+  const loadMore = useCallback(async () => {
+    if (loading || !hasMore) return;
+    setLoading(true);
+
+    try {
+      const queryParams = new URLSearchParams();
+      queryParams.set('page', (page + 1).toString());
+      if (filters.category) queryParams.set('category', filters.category);
+      if (filters.dateFrom) queryParams.set('date_from', filters.dateFrom);
+      if (filters.dateTo) queryParams.set('date_to', filters.dateTo);
+    if (filters.city) queryParams.set('city', filters.city);
+
+      const res = await fetch(`/api/events?${queryParams.toString()}`);
+      const data = await res.json();
+
+      if (data.items && data.items.length > 0) {
+        setItems(prev => [...prev, ...data.items]);
+        setPage(prev => prev + 1);
+        // Если загрузили меньше лимита, значит больше нет
+        if (data.items.length < 10) setHasMore(false);
+      } else {
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, loading, hasMore, filters]);
+
+  // Настройка Intersection Observer (следим за нижним блоком)
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting) {
+          loadMore();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current);
+    }
+
+    return () => {
+      if (observerTarget.current) {
+        observer.unobserve(observerTarget.current);
+      }
+    };
+  }, [loadMore]);
+
+  // Если фильтры поменялись, сбрасываем список
+  useEffect(() => {
+    setItems(initialItems);
+    setPage(1);
+    setHasMore(initialItems.length < initialTotal);
+  }, [initialItems, initialTotal]);
+
+  if (items.length === 0) {
+    return (
+      <div className="text-center py-10 border-2 border-dashed border-brand-line rounded-brand-lg text-brand-muted font-bold">
+        По вашим фильтрам ничего не найдено.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-6 items-center w-full">
+      {items.map((item) => (
+        <EventCard key={item.id} item={item} />
+      ))}
+      
+      {/* Триггер для загрузки (невидимый блок внизу) */}
+      {hasMore && (
+        <div ref={observerTarget} className="py-8 flex justify-center w-full">
+          {loading ? (
+            <div className="flex items-center gap-2 text-brand-muted font-bold">
+              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Загрузка...
+            </div>
+          ) : (
+            <span className="text-brand-muted font-bold text-sm opacity-50">Прокрутите вниз...</span>
+          )}
+        </div>
+      )}
+
+      {!hasMore && items.length > 0 && (
+        <div className="text-center py-6 text-brand-muted font-bold text-sm border-t-2 border-brand-line w-full mt-4">
+          Вы посмотрели все события
+        </div>
+      )}
+    </div>
   );
 }
 ````
@@ -6603,37 +6927,144 @@ export default function ScrollToTop() {
 ### `components/Sidebar.tsx`
 
 ``tsx
-import React from 'react';
+'use client';
+
+import { useRouter, useSearchParams } from 'next/navigation';
+import { CATEGORIES } from '@/lib/validations';
+import { useTransition } from 'react'; // <-- Добавили для плавности
+import { useState, useEffect } from 'react'; // <-- Добавь useState/useEffect
+import { supabase } from '@/lib/supabase'; // <-- Добавь импорт supabase
 
 export default function Sidebar() {
+  
+    const [cities, setCities] = useState<string[]>([]);
+
+  useEffect(() => {
+    supabase.from('cities').select('name').order('name').then(({ data }) => {
+      if (data) setCities(data.map(c => c.name));
+    });
+  }, []);
+  
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const currentCity = searchParams.get('city') || '';
+  const [isPending, startTransition] = useTransition(); // <-- Индикатор загрузки
+
+  // Получаем текущие выбранные категории (может быть несколько через запятую)
+  const categoriesParam = searchParams.get('category') || '';
+  const selectedCategories = categoriesParam ? categoriesParam.split(',') : [];
+  
+  const currentDateFrom = searchParams.get('date_from') || '';
+  const currentDateTo = searchParams.get('date_to') || '';
+
+  const updateFilters = (key: string, value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    
+    if (value && value !== 'Все') {
+      params.set(key, value);
+    } else {
+      params.delete(key);
+    }
+    
+    params.delete('page'); 
+    
+    // Используем startTransition для плавного обновления без "зависания"
+    startTransition(() => {
+      router.push(`/?${params.toString()}`, { scroll: false });
+    });
+  };
+
+  const toggleCategory = (cat: string) => {
+    let newCategories;
+    if (selectedCategories.includes(cat)) {
+      // Если уже выбрана — убираем
+      newCategories = selectedCategories.filter(c => c !== cat);
+    } else {
+      // Если нет — добавляем
+      newCategories = [...selectedCategories, cat];
+    }
+    
+    const value = newCategories.length > 0 ? newCategories.join(',') : 'Все';
+    updateFilters('category', value);
+  };
+
   return (
-    <aside className="bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5">
-      <h3 className="text-lg font-extrabold uppercase border-b-2 border-brand-line pb-2.5 mb-4">
+    <aside className={`bg-brand-surface border-2 border-brand-line rounded-brand-lg p-5 sticky top-24 transition-opacity ${isPending ? 'opacity-50' : 'opacity-100'}`}>
+      <h3 className="text-lg font-extrabold uppercase border-b-2 border-brand-line pb-2.5 mb-4 flex justify-between items-center">
         Фильтры
+        {(selectedCategories.length > 0 || currentDateFrom || currentDateTo) && (
+          <button 
+            onClick={() => router.push('/')}
+            className="text-[10px] text-brand-accent hover:underline normal-case"
+          >
+            Сбросить
+          </button>
+        )}
       </h3>
       
+      {/* Категории */}
       <div className="mb-6">
-        <span className="block text-[12px] font-extrabold uppercase text-brand-muted mb-2.5">Категории</span>
+        <span className="block text-[12px] font-extrabold uppercase text-brand-muted mb-2.5">Категории (можно несколько)</span>
         <div className="flex flex-wrap gap-2">
-          <button className="bg-brand-cat text-white px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase transition-colors">Все</button>
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Прогулки</button>
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Спорт и игры</button>
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Культура</button>
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Еда и напитки</button>
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Обучение</button>
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Поездки</button>
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Волонтёрство</button>
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Здесь и сейчас</button>
+          <button 
+            onClick={() => updateFilters('category', 'Все')}
+            className={`px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase transition-colors ${selectedCategories.length === 0 ? 'bg-brand-cat text-white' : 'bg-brand-bg hover:bg-brand-cat-soft'}`}
+          >
+            Все
+          </button>
+          {CATEGORIES.map(cat => {
+            const isSelected = selectedCategories.includes(cat);
+            return (
+              <button 
+                key={cat}
+                onClick={() => toggleCategory(cat)}
+                className={`px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase transition-colors ${isSelected ? 'bg-brand-cat text-white' : 'bg-brand-bg hover:bg-brand-cat-soft'}`}
+              >
+                {cat}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {/* Город */}
+      <div className="mb-6">
+        <span className="block text-[12px] font-extrabold uppercase text-brand-muted mb-2.5">Город</span>
+        <select
+          value={currentCity}
+          onChange={(e) => updateFilters('city', e.target.value)}
+          className="w-full p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand text-sm outline-none focus:border-brand-accent"
+        >
+          <option value="">Все города</option>
+          {cities.map(city => (
+            <option key={city} value={city}>{city}</option>
+          ))}
+        </select>
+      </div>
+      {/* Даты */}
+      <div className="mb-6">
+        <span className="block text-[12px] font-extrabold uppercase text-brand-muted mb-2.5">Период событий</span>
+        <div className="flex flex-col gap-3">
+          <div>
+            <label className="text-[10px] font-bold text-brand-muted uppercase block mb-1">От</label>
+            <input 
+              type="date" 
+              value={currentDateFrom}
+              onChange={(e) => updateFilters('date_from', e.target.value)}
+              className="w-full p-2 bg-brand-bg border-2 border-brand-line rounded-brand text-sm outline-none focus:border-brand-accent"
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold text-brand-muted uppercase block mb-1">До</label>
+            <input 
+              type="date" 
+              value={currentDateTo}
+              onChange={(e) => updateFilters('date_to', e.target.value)}
+              className="w-full p-2 bg-brand-bg border-2 border-brand-line rounded-brand text-sm outline-none focus:border-brand-accent"
+            />
+          </div>
         </div>
       </div>
 
-      <div className="mb-6">
-        <span className="block text-[12px] font-extrabold uppercase text-brand-muted mb-2.5">Время</span>
-        <div className="flex flex-wrap gap-2">
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Сегодня</button>
-          <button className="bg-brand-bg px-3 py-1.5 rounded-brand border-2 border-brand-line text-[12px] font-bold uppercase hover:bg-brand-cat-soft transition-colors">Выходные</button>
-        </div>
-      </div>
     </aside>
   );
 }
@@ -6722,6 +7153,34 @@ const eslintConfig = defineConfig([
 
 export default eslintConfig;
 
+````
+
+### `global.d.ts`
+
+``ts
+export {};
+
+declare global {
+  interface Window {
+    Telegram?: {
+      Login: {
+        auth: (
+          options: { bot_id: string; request_access?: string },
+          callback: (user: {
+            id: number;
+            first_name: string;
+            last_name?: string;
+            username?: string;
+            photo_url?: string;
+            auth_date: number;
+            hash: string;
+          }) => void
+        ) => void;
+      };
+    };
+    onTelegramAuth: (user: any) => void;
+  }
+}
 ````
 
 ### `lib/achievements.ts`
@@ -6943,11 +7402,14 @@ export async function getEventListDTOs(
   viewer: ViewerContext,
   limit: number = 10,
   offset: number = 0,
-  isArchive: boolean = false
+  isArchive: boolean = false,
+  
+  filters?: { category?: string; dateFrom?: string; dateTo?: string; city?: string }
 ): Promise<{ items: EventListItemDTO[]; total: number }> {
   
   // 1. Запрос с пагинацией и правильной фильтрацией
   let query = supabase
+  
     .from('events')
     .select(
       `
@@ -6972,6 +7434,35 @@ export async function getEventListDTOs(
     `,
       { count: 'exact' }
     );
+  // Применяем фильтр по городу
+  if (filters?.city) {
+    query = query.eq('city', filters.city);
+  }
+  // Применяем фильтр по категории (если выбрано несколько, они придут через запятую)
+  if (filters?.category && filters.category !== 'Все') {
+    const categoriesArray = filters.category.split(',');
+    if (categoriesArray.length > 1) {
+      query = query.in('category', categoriesArray); // Множественный выбор
+    } else {
+      query = query.eq('category', categoriesArray[0]); // Одна категория
+    }
+  }
+
+  // Применяем фильтр по дате "От"
+  if (filters?.dateFrom) {
+    // Нам нужно, чтобы событие начиналось не раньше начала выбранного дня
+    const fromDate = new Date(filters.dateFrom);
+    fromDate.setHours(0, 0, 0, 0);
+    query = query.gte('date_time', fromDate.toISOString());
+  }
+
+  // Применяем фильтр по дате "До"
+  if (filters?.dateTo) {
+    // Нам нужно, чтобы событие начиналось не позже конца выбранного дня (23:59:59)
+    const toDate = new Date(filters.dateTo);
+    toDate.setHours(23, 59, 59, 999);
+    query = query.lte('date_time', toDate.toISOString());
+  }
 
   if (isArchive) {
     const now = new Date().toISOString();
@@ -7701,6 +8192,255 @@ Proxy вызывает `supabase.auth.getUser()`, но не использует
 
 Перед публичным запуском должны проходить как минимум сценарии: нельзя получить скрытые координаты до подтверждения; нельзя читать/писать чужой чат; нельзя создать чужую/повторную заявку или самому одобрить её; невозможно превысить лимит участников при параллельных подтверждениях; некорректная форма не создаёт запись и не приводит к необработанному исключению; пользователь A не может читать/изменять профиль или уведомления пользователя B.
 
+````
+
+### `supabase/.temp/cli-latest`
+
+``
+v2.122.0
+````
+
+### `supabase/.temp/gotrue-version`
+
+``
+v2.197.0
+````
+
+### `supabase/.temp/linked-project.json`
+
+``json
+{"ref":"mekdxymeyzdfuhfpcuqs","name":"namylimsya","organization_id":"pfeqdqnyyenbnimanmnj","organization_slug":"pfeqdqnyyenbnimanmnj"}
+````
+
+### `supabase/.temp/pooler-url`
+
+``
+postgresql://postgres.mekdxymeyzdfuhfpcuqs@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+````
+
+### `supabase/.temp/postgres-version`
+
+``
+17.11.0.003
+````
+
+### `supabase/.temp/project-ref`
+
+``
+mekdxymeyzdfuhfpcuqs
+````
+
+### `supabase/.temp/rest-version`
+
+``
+v14.18
+````
+
+### `supabase/.temp/storage-migration`
+
+``
+revoke-grants-to-unused-operations
+````
+
+### `supabase/.temp/storage-version`
+
+``
+v1.80.2
+````
+
+### `supabase/config.toml`
+
+``
+
+[functions.telegram-auth]
+enabled = true
+verify_jwt = false
+import_map = "./functions/telegram-auth/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/telegram-auth/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/telegram-auth/*.html" ]
+
+````
+
+### `supabase/functions/telegram-auth/.npmrc`
+
+``
+# Configuration for private npm package dependencies
+# For more information on using private registries with Edge Functions, see:
+# https://supabase.com/docs/guides/functions/import-maps#importing-from-private-registries
+
+````
+
+### `supabase/functions/telegram-auth/deno.json`
+
+``json
+{
+  "imports": {
+    "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
+    "@supabase/server": "npm:@supabase/server@^1"
+  }
+}
+
+````
+
+### `supabase/functions/telegram-auth/index.ts`
+
+``ts
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts"
+
+const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+
+serve(async (req) => {
+  // Обработка CORS (чтобы запросы с браузера не блокировались)
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+  }
+
+  try {
+    const { hash, ...data } = await req.json();
+
+    // 1. Проверяем подпись Telegram
+    const dataCheckString = Object.keys(data)
+      .sort()
+      .map(key => `${key}=${data[key]}`)
+      .join('\n');
+
+    const secretKey = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(BOT_TOKEN));
+    const hmacKey = await crypto.subtle.importKey('raw', secretKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const signature = await crypto.subtle.sign('HMAC', hmacKey, new TextEncoder().encode(dataCheckString));
+    
+    const hexSignature = Array.from(new Uint8Array(signature))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    if (hexSignature !== hash) {
+      return new Response(JSON.stringify({ error: 'Invalid signature' }), { status: 401 });
+    }
+
+    // 2. Создаем или находим пользователя
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    
+    // Ищем профиль по telegram_id
+    const { data: existingProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('id, username')
+      .eq('telegram_id', data.id)
+      .maybeSingle();
+
+    let userId;
+    let username;
+
+    if (existingProfile) {
+      userId = existingProfile.id;
+      username = existingProfile.username;
+    } else {
+      // Если нет — создаем нового пользователя в Auth
+      const email = `tg_${data.id}@namylimsya.local`;
+      
+      // Формируем никнейм (используем username из TG или first_name)
+      const baseUsername = data.username || data.first_name || `user_${data.id}`;
+      // Убираем лишние символы (оставляем буквы, цифры и _)
+      const safeUsername = baseUsername.replace(/[^a-zA-Zа-яА-Я0-9_]/g, '');
+
+      const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        email_confirm: true,
+        user_metadata: { 
+          username: safeUsername,
+          telegram_id: data.id
+        }
+      });
+
+      if (authError) throw authError;
+      userId = authUser.user.id;
+      username = safeUsername;
+
+      // Обновляем профиль (он создастся триггером, но нам нужно добавить telegram_id)
+      await supabaseAdmin.from('profiles').update({ telegram_id: data.id }).eq('id', userId);
+    }
+
+    // 3. Отправляем уведомление в Telegram
+    try {
+      const tgMessage = `
+👋 Привет, ${data.first_name}!
+
+Вы успешно авторизовались на платформе *«Намылимся»*.
+
+Теперь вам доступны:
+• Создание и поиск событий
+• Общение в чатах
+• Получение наград
+
+Увидимся на встречах! 🚀
+      `;
+
+      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: data.id,
+          text: tgMessage,
+          parse_mode: 'Markdown',
+        }),
+      });
+    } catch (tgError) {
+      console.error('Ошибка отправки сообщения в Telegram:', tgError);
+      // Мы не прерываем авторизацию, если сообщение не отправилось
+    }
+
+    // 4. Генерируем сессию (magic link)
+    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'magiclink',
+      email: `tg_${data.id}@namylimsya.local`,
+    });
+
+    if (linkError) throw linkError;
+
+    // Возвращаем токены
+    return new Response(JSON.stringify({ 
+      token: linkData.properties.hashed_token,
+      user_id: userId
+    }), { 
+      headers: { 
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      } 
+    });
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return new Response(JSON.stringify({ error: message }), { 
+      status: 500,
+      headers: { 
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      } 
+    });
+  }
+})
+````
+
+### `supabase/functions/telegram-auth/tsconfig.json`
+
+``json
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["deno.window"],
+    "strict": true
+  }
+}
 ````
 
 ### `tools/bundle-project.ps1`
@@ -8508,7 +9248,7 @@ Write-Host "Готово: $Output ($($files.Count) файлов, $sizeKb KB)" -F
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "supabase"]
 }
 ````
 
