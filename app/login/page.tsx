@@ -107,10 +107,9 @@ function LoginForm() {
         </div>
       )}
 
-            {/* Telegram Login Widget */}
-      <div className="flex flex-col items-center mb-6">
-        
-        {/* Скрипт для обработки колбэка от Telegram */}
+
+      {/* Telegram Login Widget */}
+      <div className="w-full flex flex-col items-center mb-6 relative">
         <Script id="telegram-auth-handler" strategy="lazyOnload">
           {`
             window.onTelegramAuth = function (user) {
@@ -127,30 +126,24 @@ function LoginForm() {
                   alert('Ошибка входа');
                   console.error(data);
                 }
-              })
-              .catch(err => {
-                alert('Ошибка сети');
-                console.error(err);
               });
             };
           `}
         </Script>
 
-        {/* Сам виджет Telegram */}
-        <Script 
-          src="https://telegram.org/js/telegram-widget.js?22" 
-          strategy="lazyOnload"
-          data-telegram-login="namylimsya_bot"
-          data-size="large" 
-          data-onauth="onTelegramAuth(user)" 
-          data-request-access="write"
-        />
-        
-        {/* Разделитель */}
-        <div className="flex items-center gap-2 w-full mt-6">
-          <div className="flex-1 h-px bg-brand-line/50"></div>
-          <span className="text-xs font-bold text-brand-muted uppercase">или по email</span>
-          <div className="flex-1 h-px bg-brand-line/50"></div>
+        {/* Обертка для виджета */}
+        <div 
+          className="relative flex justify-center w-full h-[50px]" 
+          id="telegram-login-container"
+        >
+          <Script 
+            src="https://telegram.org/js/telegram-widget.js?22" 
+            strategy="lazyOnload"
+            data-telegram-login="namylimsya_bot" 
+            data-size="large" 
+            data-onauth="onTelegramAuth(user)" 
+            data-request-access="write"
+          />
         </div>
       </div>
 
