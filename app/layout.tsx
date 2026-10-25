@@ -42,7 +42,7 @@ export default function RootLayout({
           {children}
         </PageTransition>
 
-          <footer className="max-w-[1100px] w-full mx-auto mt-auto px-6 py-5 text-brand-muted text-[13px] border-t-2 border-brand-line flex justify-between items-center">
+          <footer className="max-w-[1100px] w-full mx-auto mt-20 px-6 py-5 text-brand-muted text-[13px] border-t-2 border-brand-line flex justify-between items-center">
           <div>
             <p>«Намылимся.» — площадка для живых встреч. Ответственность за проведение событий лежат на организаторах и участниках.</p>
             <p>16+ · Правила сообщества · <Link href="/support" className="hover:text-brand-accent transition-colors">Написать в поддержку</Link></p>
