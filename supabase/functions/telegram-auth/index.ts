@@ -29,7 +29,7 @@ serve(async (req) => {
         code: qtoken,
         client_id: '8934385689',
         client_secret: CLIENT_SECRET,
-        redirect_uri: 'https://namylimsya.vercel.app/login' // <-- ВАЖНО: указываем /login, так как токен шлется сюда
+        redirect_uri: 'https://namylimsya.vercel.app/auth/callback' // <-- ВАЖНО: указываем /login, так как токен шлется сюда
       })
     });
 
