@@ -18,7 +18,7 @@ export default function RootLayout({
   return (
     <html lang="ru" data-theme="light" suppressHydrationWarning>
       <head>
-        <script src="https://telegram.org/js/telegram-widget.js?23" async></script>
+
         {/* Скрипт для мгновенного применения темы до рендера (чтобы не было вспышки) */}
         <script
           dangerouslySetInnerHTML={{

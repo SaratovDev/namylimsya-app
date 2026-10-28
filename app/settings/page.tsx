@@ -128,7 +128,7 @@ const handleSave = async (e: React.FormEvent) => {
 </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
-              <label className="text-[12px] font-extrabold uppercase text-brand-muted">Возраст (полных лет)</label>
+              <label className="text-[12px] font-extrabold uppercase text-brand-muted">Возраст</label>
               <input type="number" value={age} onChange={e => setAge(e.target.value)} min="14" max="99" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" />
             </div>
             
@@ -174,10 +174,6 @@ const handleSave = async (e: React.FormEvent) => {
             <div className="flex flex-col gap-1.5">
               <label className="text-[12px] font-extrabold uppercase text-brand-muted">Telegram (без @)</label>
               <input type="text" value={telegram} onChange={e => setTelegram(e.target.value)} placeholder="username" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[12px] font-extrabold uppercase text-brand-muted">ВКонтакте (ID)</label>
-              <input type="text" value={vk} onChange={e => setVk(e.target.value)} placeholder="id123456" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" />
             </div>
           </div>
 

@@ -1,6 +1,6 @@
 # Project bundle
 
-Generated: 2026-10-25 15:29
+Generated: 2026-10-25 22:04
 Root: C:\Users\Lenovo\Downloads\event_mp\namylimsya-app
 
 ## Tree
@@ -92,6 +92,7 @@ namylimsya-app/
 |   |-- event-queries.ts
 |   |-- supabase.ts
 |   |-- supabase-server.ts
+|   |-- username-generator.ts
 |   \-- validations.ts
 |-- public/
 |   |-- file.svg
@@ -128,7 +129,6 @@ namylimsya-app/
 |-- postcss.config.mjs
 |-- proxy.ts
 |-- README.md
-|-- security-audit-namylimsya.md
 |-- tsconfig.json
 \-- vitest.config.ts
 ```
@@ -1751,47 +1751,26 @@ export default async function ArchivePage({
 'use client';
 
 import { useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 function CallbackHandler() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   useEffect(() => {
-    // 1. Проверяем старый метод (magic link)
-    const token = searchParams.get('token');
-    if (token) {
-      supabase.auth.verifyOtp({ token_hash: token, type: 'magiclink' })
-        .then(({ error }) => {
-          if (error) alert(error.message);
-          else router.push('/');
-        });
-      return;
-    }
-
-    // 2. Проверяем новый метод (OIDC code)
-    const code = searchParams.get('code');
-    if (code) {
-      fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/telegram-auth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code })
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (data.token) {
-          return supabase.auth.verifyOtp({ token_hash: data.token, type: 'magiclink' });
-        }
-        throw new Error(data.error || 'Ошибка сервера');
-      })
-      .then(({ error }) => {
-        if (error) alert(error.message);
-        else router.push('/');
-      })
-      .catch(err => alert(err.message));
-    }
-  }, [router, searchParams]);
+    // Supabase при OAuth сам перехватывает токен из URL (в hash-части)
+    // и сохраняет сессию в куки. Нам нужно просто дождаться этого.
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.error('Ошибка авторизации:', error);
+      }
+      
+      // В любом случае отправляем на главную. 
+      // Если сессия есть, router.refresh() обновит интерфейс.
+      router.push('/');
+      router.refresh();
+    });
+  }, [router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center">
@@ -1804,7 +1783,7 @@ function CallbackHandler() {
 
 export default function AuthCallback() {
   return (
-    <Suspense fallback={<div>Загрузка...</div>}>
+    <Suspense fallback={<div className="text-center font-bold">Загрузка...</div>}>
       <CallbackHandler />
     </Suspense>
   );
@@ -2577,9 +2556,6 @@ import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
-// Твой Client ID из настроек Login Widget
-const TELEGRAM_CLIENT_ID = '8934385689'; 
-
 function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const searchParams = useSearchParams();
@@ -2606,55 +2582,36 @@ function LoginForm() {
     return () => clearTimeout(timer);
   }, [isRegisterMode]);
 
-    // Перехватываем токен, который Telegram шлет в URL
-  // Перехватываем токен, который Telegram шлет в URL
-  useEffect(() => {
-    const qtoken = searchParams.get('qtoken');
-    if (qtoken) {
-      setLoading(true);
-      setMessage('Авторизация через Telegram...');
-      
-      // Отправляем токен на нашу Edge-функцию
-      fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/telegram-auth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: qtoken }), // Передаем как code
-      })
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Ошибка сервера');
-        
-        if (data.token) {
-          return supabase.auth.verifyOtp({ token_hash: data.token, type: 'magiclink' });
-        }
-        throw new Error('Нет токена от Supabase');
-      })
-      .then(({ error }) => {
-        if (error) throw error;
-        router.push('/');
-        router.refresh();
-      })
-      .catch(err => {
-        console.error(err);
-        setMessage(err.message || 'Ошибка Telegram');
-        setLoading(false);
-      });
+  // === ВХОД ЧЕРЕЗ GOOGLE ===
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+    if (error) {
+      setMessage(error.message);
+      setLoading(false);
     }
-  }, [searchParams, router]);
-
-  // === НОВЫЙ МЕТОД: ПРОСТО РЕДИРЕКТ В TELEGRAM ===
-  const handleTgLogin = () => {
-    // Берем текущий домен и добавляем путь для колбэка
-    const redirectUri = `${window.location.origin}/auth/callback`;
-    
-    // Формируем ссылку для Telegram OpenID Connect
-    const url = `https://oauth.telegram.org/auth?client_id=${TELEGRAM_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid+profile`;
-    
-    // Перенаправляем пользователя
-    window.location.href = url;
+  };
+ // === ВХОД ЧЕРЕЗ VK ===
+  const handleVkLogin = async () => {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'vk' as any, // <-- Добавили as any, чтобы TypeScript не ругался
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+    if (error) {
+      setMessage(error.message);
+      setLoading(false);
+    }
   };
 
-  // === ОБЫЧНЫЙ ВХОД ПО EMAIL ===
+  // === ВХОД ПО EMAIL ===
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -2711,17 +2668,30 @@ function LoginForm() {
         </div>
       )}
 
-      {/* Кнопка Telegram */}
-      <div className="w-full flex flex-col items-center mb-6">
+      {/* Кнопки OAuth (Google и VK) */}
+      <div className="w-full flex flex-col gap-3 mb-6">
         <button
           type="button"
-          onClick={handleTgLogin}
-          className="w-full bg-[#2AABEE] text-white font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-brand-line rounded-brand hover:bg-[#229ED9] transition-colors flex items-center justify-center gap-2"
+          onClick={handleGoogleLogin}
+          disabled={loading}
+          className="w-full bg-white text-gray-800 font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-gray-300 rounded-brand hover:bg-gray-100 transition-colors flex items-center justify-center gap-2"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.460-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+          <svg width="20" height="20" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
           </svg>
-          Войти через Telegram
+          Войти через Google
+        </button>
+        
+        <button
+          type="button"
+          onClick={handleVkLogin}
+          disabled={loading}
+          className="w-full bg-[#0077FF] text-white font-extrabold text-sm uppercase px-6 py-3.5 border-2 border-[#005BCC] rounded-brand hover:bg-[#0066DD] transition-colors flex items-center justify-center gap-2"
+        >
+          Войти через ВКонтакте
         </button>
       </div>
 
@@ -3360,6 +3330,7 @@ import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
 import { useRouter } from 'next/navigation';
 
+
 const INTERESTS_LIST = [
   'Спорт', 'Кино', 'Музыка', 'Игры', 'Книги', 'Фотография', 'Кулинария', 'Путешествия', 
   'Искусство', 'IT и технологии', 'Животные', 'Психология', 'Бизнес', 'Танцы', 'Театр', 
@@ -3367,6 +3338,7 @@ const INTERESTS_LIST = [
 ];
 
 export default function SettingsPage() {
+  const [usernameInput, setUsernameInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 const [profile, setProfile] = useState<{ id: string; username: string } | null>(null);
@@ -3390,6 +3362,7 @@ const [profile, setProfile] = useState<{ id: string; username: string } | null>(
       supabase.from('profiles').select('*').eq('id', user.id).single().then(({ data }) => {
         if (data) {
           setProfile(data);
+          setUsernameInput(data.username || '');
           setAge(data.age?.toString() || '');
           setGender(data.gender || 'none');
           setBio(data.bio || '');
@@ -3414,29 +3387,46 @@ const [profile, setProfile] = useState<{ id: string; username: string } | null>(
     }
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!profile) return; // <--- Проверка на null
-    setSaving(true);
-    try {
-      const { error } = await supabase.from('profiles').update({
-        age: age ? parseInt(age) : null,
-        gender,
-        bio: bio.trim() || null,
-        telegram: telegram.trim() || null,
-        vk: vk.trim() || null,
-        interests: interests.length > 0 ? interests : null
-      }).eq('id', profile.id);
+const handleSave = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!profile) return;
+  
+  // Простая валидация ника
+  if (usernameInput.length < 3) {
+    showError('Никнейм должен быть не короче 3 символов');
+    return;
+  }
 
-      if (error) throw error;
-      showSuccess('Профиль успешно обновлен!');
-      router.push(`/@${profile.username}`);
-    } catch {
-      showError('Ошибка сохранения профиля');
-    } finally {
-      setSaving(false);
+  setSaving(true);
+  try {
+    const { error } = await supabase.from('profiles').update({
+      username: usernameInput, // <--- ДОБАВЬ ЭТО
+      age: age ? parseInt(age) : null,
+      gender,
+      bio: bio.trim() || null,
+      telegram: telegram.trim() || null,
+      vk: vk.trim() || null,
+      interests: interests.length > 0 ? interests : null
+    }).eq('id', profile.id);
+
+    if (error) {
+      // Если база выдала ошибку уникальности (такой ник уже есть)
+      if (error.code === '23505') {
+        throw new Error('Этот никнейм уже занят. Выберите другой.');
+      }
+      throw error;
     }
-  };
+    
+    showSuccess('Профиль успешно обновлен!');
+    // Обновляем URL профиля, если ник изменился
+    router.push(`/@${usernameInput}`);
+    router.refresh();
+  } catch (error) {
+    showError(error instanceof Error ? error.message : 'Ошибка сохранения профиля');
+  } finally {
+    setSaving(false);
+  }
+};
 
   if (loading) return <div className="text-center py-20 font-bold">Загрузка...</div>;
 
@@ -3448,10 +3438,22 @@ const [profile, setProfile] = useState<{ id: string; username: string } | null>(
         </h1>
 
         <form onSubmit={handleSave} className="flex flex-col gap-6">
-          
+          <div className="flex flex-col gap-1.5 mb-4">
+  <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш никнейм (публичное имя)</label>
+  <input 
+    type="text" 
+    value={usernameInput} 
+    onChange={e => setUsernameInput(e.target.value.replace(/[^a-zA-Zа-яА-Я0-9_]/g, ''))} 
+    required 
+    minLength={3}
+    maxLength={32}
+    className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" 
+  />
+  <span className="text-[11px] text-brand-muted font-bold">Разрешены буквы, цифры и _. Должен быть уникальным.</span>
+</div>
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
-              <label className="text-[12px] font-extrabold uppercase text-brand-muted">Возраст (полных лет)</label>
+              <label className="text-[12px] font-extrabold uppercase text-brand-muted">Возраст</label>
               <input type="number" value={age} onChange={e => setAge(e.target.value)} min="14" max="99" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" />
             </div>
             
@@ -3497,10 +3499,6 @@ const [profile, setProfile] = useState<{ id: string; username: string } | null>(
             <div className="flex flex-col gap-1.5">
               <label className="text-[12px] font-extrabold uppercase text-brand-muted">Telegram (без @)</label>
               <input type="text" value={telegram} onChange={e => setTelegram(e.target.value)} placeholder="username" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[12px] font-extrabold uppercase text-brand-muted">ВКонтакте (ID)</label>
-              <input type="text" value={vk} onChange={e => setVk(e.target.value)} placeholder="id123456" className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent" />
             </div>
           </div>
 
@@ -5889,19 +5887,29 @@ export default function Header() {
   }, []);
 
   useEffect(() => {
-    if (user) {
-      supabase
-        .from('profiles')
-        .select('username')
-        .eq('id', user.id)
-        .maybeSingle()
-        .then(({ data }) => {
-          setUsername(data?.username || user.email?.split('@')[0] || 'Пользователь');
-        });
-    } else {
-      const timer = setTimeout(() => setUsername(null), 0);
-      return () => clearTimeout(timer);
-    }
+    const fetchProfile = () => {
+      if (user) {
+        supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', user.id)
+          .maybeSingle()
+          .then(({ data }) => {
+            setUsername(data?.username || user.email?.split('@')[0] || 'Пользователь');
+          });
+      } else {
+        setUsername(null);
+      }
+    };
+
+    fetchProfile();
+
+    // Слушаем кастомное событие смены профиля
+    window.addEventListener('profileUpdated', fetchProfile);
+
+    return () => {
+      window.removeEventListener('profileUpdated', fetchProfile);
+    };
   }, [user]);
 
   useEffect(() => {
@@ -7610,6 +7618,34 @@ export async function createClient() {
 }
 ````
 
+### `lib/username-generator.ts`
+
+``ts
+// Массивы слов (пока по 10, но ты можешь легко расширить их до 2000)
+const ADJECTIVES = [
+  'Веселый', 'Грустный', 'Быстрый', 'Медленный', 'Умный',
+  'Хитрый', 'Добрый', 'Злой', 'Смелый', 'Тихий'
+  // ... добавляй сюда свои прилагательные
+];
+
+const NOUNS = [
+  'Енот', 'Кот', 'Пес', 'Пингвин', 'Лис',
+  'Медведь', 'Заяц', 'Волк', 'Тигр', 'Лев'
+  // ... добавляй сюда свои существительные
+];
+
+export function generateRandomUsername(): string {
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+  // Добавляем 2 случайные цифры в конец, чтобы избежать совпадений
+  const randomNum = Math.floor(10 + Math.random() * 90);
+  
+  // Формируем никнейм: Веселый_Енот42
+  // Заменяем все недопустимые символы (оставляем буквы, цифры и _)
+  return `${adj}_${noun}${randomNum}`.replace(/[^a-zA-Zа-яА-Я0-9_]/g, '');
+}
+````
+
 ### `lib/validations.ts`
 
 ``ts
@@ -7922,239 +7958,10 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
  
 ````
 
-### `security-audit-namylimsya.md`
-
-``md
-# Аудит `namylimsya-app`
-
-**Дата анализа:** 21 октября 2026 г.  
-**Основание:** `security-bundle.md` (снимок 32 файлов, около 2 700 строк).  
-**Тип проверки:** статический анализ представленного кода, без запуска приложения и без доступа к Supabase.
-
-## Итог
-
-В первую очередь нужно исправить передачу скрытого адреса/координат в клиент, проверить политики RLS и перенести критичные бизнес-ограничения из браузера в серверную/базовую логику. Затем — исправить валидацию `createEvent`, контроль перехода статусов заявок и N+1-запросы на главной.
-
-В этом документе разделены **подтверждённые по коду дефекты** и **риски, зависящие от отсутствующих настроек Supabase**. Отсутствие SQL-политик в выгрузке не означает, что RLS выключен; это означает, что его безопасность здесь нельзя подтвердить.
-
-## Приоритет P1 — исправить или проверить до публичного запуска
-
-### 1. Скрытая локация всё равно отправляется в браузер
-
-**Файлы:** `components/EventList.tsx` (примерно строки 1900–1955), `components/EventCard.tsx` (примерно 1585–1685).  
-**Статус:** дефект передачи данных подтверждён кодом.
-
-`EventList` всегда передаёт в клиентский компонент `location`, `lat` и `lng`. Условие `hideLocation && !isOrganizer && application?.status !== 'approved'` управляет отображением адреса, а в `Map` передаётся флаг `hideExactLocation`. Но `EventCard` — клиентский компонент, и все его props доступны браузеру. Скрытая информация не должна попадать в props вообще.
-
-**Что сделать:**
-
-- На сервере определить права просмотра точного места: организатор или участник со статусом `approved`.
-- Формировать DTO события для конкретного пользователя. Неавторизованному пользователю передавать только публичное описание места, а `location`, `lat`, `lng` исключать или заменять безопасными значениями.
-- Не отправлять точные данные в HTML, RSC payload, клиентские props, атрибуты DOM и ответы API до подтверждения доступа.
-- Проверить не только карточку ленты, но и страницу события, карту, профиль организатора, архив и любые API/Server Actions, которые возвращают событие.
-- Добавить тест: для события со `hide_location = true` неавторизованный пользователь и пользователь с `pending`/`rejected` заявкой не получают точный адрес или координаты в сетевом ответе; `approved` участник и организатор получают их.
-
-### 2. Безопасность прямых запросов к Supabase нельзя подтвердить без RLS
-
-**Файлы:** `components/EventCard.tsx`, `components/EventChat.tsx`, `components/NotificationsBell.tsx`, `components/AvatarPicker.tsx`, `app/login/page.tsx`.  
-**Статус:** риск зависит от политик и грантов в БД; SQL в выгрузке отсутствует.
-
-Браузер напрямую обращается к `applications`, `messages`, `notifications` и `profiles`. Публичный Supabase anon/publishable key в браузере сам по себе ожидаем; защищать данные должны права БД и серверная бизнес-логика. В выгрузке нет SQL-схемы, миграций, RLS policies или тестов политик.
-
-**Обязательно проверить в Supabase:**
-
-- RLS включён на всех таблицах в доступной из API схеме, а гранты `anon`/`authenticated` не шире необходимого.
-- `profiles`: пользователь может менять только разрешённые поля собственного профиля; нельзя менять чужой `username`, `gender` или `avatar_url`.
-- `events`: создатель события неизменяемо связан с `auth.uid()`; пользователь не может менять `organizer_id` и присваивать себе привилегированный `organizer_rank`.
-- `applications`: пользователь может подать/отменить только собственную заявку; организатор может менять статус только заявки на своё событие; пользователь не может сам выставить `approved`/`rejected`.
-- `messages`: читать и писать могут только организатор и допустимые участники события — по продуктовым правилам, а не только потому, что известен `event_id`. Нужно решить отдельно, должны ли `pending` и `rejected` участники видеть чат.
-- `notifications`: читать и помечать прочитанными можно только свои уведомления; нельзя создавать уведомления произвольным получателям или изменять чужие.
-- realtime-доступ к `messages` и `notifications` защищён теми же ожидаемыми правилами.
-
-Проверить эти политики тестами, в том числе запросами от пользователя A к данным пользователя B и неавторизованными запросами. Официальная документация Supabase рекомендует включать RLS для таблиц в exposed-схеме и явно задавать grants и политики: https://supabase.com/docs/guides/database/postgres/row-level-security
-
-### 3. Клиентские ограничения заявок можно обойти
-
-**Файл:** `components/EventCard.tsx` (примерно строки 1450–1490); `components/EventList.tsx` (примерно строка 1949).  
-**Статус:** клиентские ограничения и ошибочный счётчик подтверждены; возможность злоупотребления зависит от RLS/ограничений БД.
-
-В интерфейсе действует лимит в три активные заявки, но проверка выполняется в `handleApply`, а запись — прямым браузерным запросом. Клиент отправляет собственные `user_id` и `status`. Любое ограничение, которое существует только в состоянии React, можно обойти прямым API-запросом.
-
-Количество участников в каждой карточке явно передаётся как `currentParticipants={0}`. Это делает счётчик мест недостоверным. В серверном действии подтверждения заявки также нет проверки вместимости события и атомарного резервирования места.
-
-**Что сделать:**
-
-- Перенести подачу заявки в Server Action или Postgres RPC. Сервер/БД должны устанавливать `user_id = auth.uid()` и `status = 'pending'`, а не доверять этим полям от клиента.
-- Добавить `UNIQUE (event_id, user_id)`, если повторная заявка одного пользователя на то же событие запрещена.
-- Добавить ограничение допустимых статусов и политику, запрещающую пользователю повышать себе статус.
-- Проверять лимит в три активные заявки на сервере/в транзакции, а не по состоянию компонента.
-- При подтверждении блокировать строку события или использовать транзакционную RPC-функцию, чтобы параллельные подтверждения не превысили лимит мест.
-- Возвращать фактическое количество одобренных участников из БД и использовать его во всех карточках.
-- Предусмотреть ограничения на число создаваемых событий/заявок и скорость запросов, чтобы снизить спам.
-
-### 4. `createEvent()` не валидирует данные на сервере
-
-**Файл:** `app/actions.ts` (примерно строки 117–171).  
-**Статус:** подтверждено кодом.
-
-Обработчик делает приведения типов, но не проверяет обязательность, форматы и диапазоны полей. `parseFloat()`/`parseInt()` могут дать `NaN`; `new Date(...).toISOString()` выбросит исключение для невалидной даты; `category` можно изменить вручную; дата в прошлом, чрезмерно длинные строки и абсурдная вместимость не запрещены этим обработчиком.
-
-**Что сделать:**
-
-- Разбирать `FormData` через серверную схему (например, Zod) и возвращать контролируемую ошибку валидации.
-- Для каждого поля проверить тип, наличие и длину; для `category` использовать whitelist; для `max_participants` — целое число в бизнес-диапазоне; для `lat`/`lng` — конечные числа и диапазоны `-90…90`/`-180…180`.
-- Проверить, что дата и время действительно существуют, удовлетворяют правилам планирования и относятся к явно выбранному часовому поясу.
-- Передавать в запрос БД только очищенный объект из проверенных значений.
-- Не принимать от клиента `organizer_id`, `organizer_name` и `organizer_rank` как доверенные данные. Имя/ID получать по текущему пользователю на сервере, роль/ранг контролировать серверной логикой/БД.
-- Покрыть тестами пустые поля, отсутствующие ключи, `NaN`, невалидную дату, неверные координаты, подменённую категорию и слишком длинный текст.
-
-### 5. Approve/reject не проверяют, что заявка действительно обновлена
-
-**Файл:** `app/actions.ts` (примерно строки 175–285).  
-**Статус:** подтверждено, что обработчик не проверяет число обновлённых строк; последствия для чужих данных зависят от RLS.
-
-Обе функции получают список всех событий пользователя, обновляют заявку с фильтром по этим событиям, а затем читают `applications` по одному `applicationId` уже без этого ограничения. Запрос `UPDATE`, затронувший ноль строк, не обязательно вернёт ошибку. При подходящих правах чтения/создания уведомлений обработчик может продолжить работу и уведомить пользователя, хотя статус не изменился. Между изменением заявки и созданием уведомления также нет общей транзакции. Дублируется почти одна и та же логика подтверждения/отклонения.
-
-**Что сделать:**
-
-- Получать заявку вместе с `event_id` и проверять право организатора до изменения статуса.
-- Выполнять условное обновление только если текущий статус — `pending`, возвращать изменённую строку через `.select()` и считать отсутствие строки отказом в операции.
-- Не отправлять уведомление, пока изменение статуса не подтверждено.
-- Предпочтительно выполнять проверку права, изменение статуса и вставку уведомления в одной транзакционной Postgres RPC-функции.
-- Обеспечить идемпотентность: повторный вызов не должен создавать повторные уведомления или менять окончательный статус произвольным образом.
-- Не читать список всех ID событий организатора ради проверки одной заявки; проверять конкретную связь `application → event → organizer`.
-
-Документация Next.js отдельно указывает, что Server Actions нужно считать публичными endpoint-ами: каждое действие должно самостоятельно проверять авторизацию и валидировать входные данные: https://nextjs.org/docs/app/guides/authentication
-
-## Приоритет P2 — надёжность, производительность и качество
-
-### 6. N+1 запросы и неограниченная лента
-
-**Файлы:** `components/EventList.tsx`, `components/EventCard.tsx`.
-
-`EventList` запрашивает события без пагинации и передаёт каждую запись отдельному клиентскому `EventCard`. Каждый `EventCard` последовательно вызывает `auth.getUser()`, читает заявку текущего пользователя для события и запрашивает общий счётчик его активных заявок. Счётчик активных заявок повторяется для каждого события, хотя для одного пользователя его значение общее. При N событиях это около `1 + 3N` запросов только на список и карточки, помимо запросов шапки, уведомлений и proxy.
-
-**Что сделать:**
-
-- Загружать пользовательскую сессию один раз на сервере и получать статусы заявок/общее число активных заявок пакетно.
-- Уменьшить данные выборки до нужных колонок вместо `select('*')`.
-- Добавить серверную пагинацию или курсорную загрузку, а также явное правило выдачи прошлых/будущих событий.
-- Рассмотреть server-side DTO списка событий с агрегированными `approvedParticipantsCount`, `myApplicationStatus` и признаком доступа к локации.
-- Избежать запроса одной и той же информации из каждой карточки; не переносить просто все запросы в большой клиентский `Promise.all`, если они могут быть объединены на уровне БД.
-
-### 7. Список «Мои события» имеет лишние выборки и квадратичное сопоставление профилей
-
-**Файл:** `app/my-events/page.tsx` (примерно строки 702–739).
-
-Запрашиваются все события пользователя, все заявки по этим событиям и все профили авторов заявок. Затем для каждой заявки выполняется `profiles?.find(...)`, то есть список профилей повторно сканируется для каждой заявки. При росте объёма это O(A × P) работы в памяти. Несколько выборок используют `select('*')`.
-
-**Что сделать:** явно выбрать необходимые колонки, строить `Map<userId, profile>` для O(A + P) сопоставления, использовать join/агрегацию там, где это улучшает план запроса, и добавлять пагинацию при росте данных.
-
-### 8. Регистрация зависит от клиентской предварительной проверки ника
-
-**Файл:** `app/login/page.tsx` (примерно строки 513–551, 584).
-
-Ник проверяется отдельным запросом до `signUp`, но это не устраняет гонку: две регистрации могут одновременно пройти проверку. Требование уникальности должно обеспечиваться индексом/ограничением БД, при необходимости — по нормализованному регистронезависимому значению.
-
-После `signUp` клиент обновляет `profiles`. Если подтверждение email включено и сессия ещё не выдана, такой запрос может не пройти RLS. Кроме того, обновление без `.select()` может не подтвердить, что строка профиля реально обновлена, если запрос завершился без явной ошибки, но изменил ноль строк.
-
-**Что сделать:** проверить trigger/механизм создания строки `profiles`, конфигурацию email confirmation и RLS для регистрации; атомарно создавать профиль с допустимым ником через доверенный серверный путь или безопасный DB trigger. Серверно валидировать длину/символы ника и не полагаться на регулярное выражение в браузере.
-
-### 9. Чат получает всю историю без ограничений
-
-**Файл:** `components/EventChat.tsx` (примерно строки 1727–1770, 1798–1815).
-
-История сообщений запрашивается без `limit`/пагинации. Каждое новое событие realtime вызывает отдельный запрос профиля автора. Длина сообщения не ограничена компонентом, отправитель передаётся через `currentUserId`, полученный в props. В коде нет ограничения частоты отправки.
-
-**Что сделать:** ограничить размер сообщения и частоту отправки, загружать историю постранично, пакетно получать профили авторов, подписываться только на сообщения конкретного разрешённого события и получать ID автора из проверенной сессии/`auth.uid()` на уровне политики БД. Проверить правила чтения сообщений отдельно от возможности открыть страницу события.
-
-### 10. Уведомления помечаются прочитанными до подтверждения обновления
-
-**Файл:** `components/NotificationsBell.tsx`.
-
-При открытии списка вызывается `markAsRead()`. Ответ от Supabase не проверяется, однако локальные `unreadCount` и `notifications` в любом случае обновляются так, будто запись прошла успешно. Ошибка или отказ RLS приводят к рассинхронизации интерфейса. Поведение также означает, что уведомления считаются прочитанными сразу при открытии выпадающего списка.
-
-**Что сделать:** явно обрабатывать ошибку и обновлять локальное состояние после успешного ответа. Зафиксировать ожидаемое продуктовое поведение: отмечать уведомления при открытии или только при их фактическом просмотре.
-
-### 11. Сырые ошибки БД отдаются пользователю
-
-**Файл:** `components/EventList.tsx`.
-
-При ошибке загрузки в UI выводятся `error.message` и `error.code`. Такие подробности обычно не нужны пользователю и могут раскрыть имена объектов БД или детали конфигурации.
-
-**Что сделать:** логировать полную ошибку на сервере, а посетителю показывать нейтральное сообщение с возможностью повторить загрузку.
-
-### 12. `proxy.ts` не является защитой маршрутов
-
-**Файл:** `proxy.ts`.
-
-Proxy вызывает `supabase.auth.getUser()`, но не использует возвращённого пользователя для решения о доступе. Это может помогать обновлять Auth-сессию, но само по себе не блокирует доступ к странице. Авторизацию и права следует проверять внутри защищённых страниц, Data Access Layer, Server Actions и политик БД. Кроме того, matcher запускает proxy для большинства запросов, а `getUser()` может создавать лишний сетевой round trip; оптимизировать это следует с учётом актуальных рекомендаций Supabase и измерений.
-
-### 13. Время события может сдвигаться относительно часового пояса пользователя
-
-**Файл:** `app/actions.ts`, выражение `new Date(`${date}T${time}`).toISOString()`.
-
-Строка даты/времени без явного смещения трактуется в часовом поясе окружения, где выполняется код. Если сервер и пользователь работают в разных часовых поясах, сохранённый момент может не совпасть с ожидаемым временем встречи.
-
-**Что сделать:** определить часовой пояс события как часть модели и явно преобразовывать локальные дату/время в UTC с этим поясом. Не полагаться на системный timezone сервера.
-
-### 14. Возможные проблемы с кодировкой текста
-
-В выгрузке многочисленные русские строки представлены в виде `РќР...`, включая UI-текст, сообщения ошибок и метаданные. Это может быть дефект исходных файлов либо ошибка формирования самой выгрузки; по одному bundle нельзя надёжно установить причину.
-
-**Что сделать:** проверить реальные `.ts`/`.tsx`/`.css` в UTF-8 до исправления. Если исходники содержат те же строки, восстановить текст и отдельно проверить регулярное выражение ника в `app/login/page.tsx` — оно также выглядит повреждённым в выгрузке. Не выполнять слепую массовую перекодировку без проверки оригиналов.
-
-### 15. Неизвестно, какие зависимости реально установлены
-
-В бандле есть `package.json`, но нет lockfile, установленного дерева зависимостей или вывода dependency audit. Поэтому по этой выгрузке нельзя достоверно утверждать, есть ли известные CVE в транзитивных зависимостях.
-
-**Что сделать:** включить lockfile в аудит, обновлять зависимости контролируемо и запускать `npm audit`/аналогичный сканер вместе с тестовой сборкой. Зафиксировать результаты, а не только заявленные диапазоны версий из `package.json`.
-
-## Приоритет P3 — упорядочивание проекта
-
-- Создать единый слой авторизации и доступа к данным: `requireUser`, `requireEventOrganizer`, функции получения безопасных DTO событий и валидаторы Server Actions.
-- Снизить дублирование между `approveApplication` и `rejectApplication`; общая проверка полномочий и транзакционное изменение статуса должны быть в одном месте.
-- Не использовать `select('*')`, если нужны 2–5 колонок: это снижает передачу лишних данных и упрощает типизацию.
-- Добавить индексы после проверки планов запросов: вероятные кандидаты — `applications(event_id, status)`, `applications(user_id, status)`, `messages(event_id, created_at)`, `notifications(user_id, created_at)`, `events(date_time)`. Сверить с фактическими фильтрами, ключами и существующими индексами.
-- Добавить серверную обработку ограничений частоты для регистрации, создания событий, заявок и сообщений.
-- Добавить базовые security headers (например, `X-Content-Type-Options`, `Referrer-Policy`, подходящую `frame-ancestors`/CSP и `Permissions-Policy`), предварительно протестировав их совместимость с картой, шрифтами и используемыми ресурсами.
-- Проверить `app/globals.css`: глобальное правило `.border-2 { border-width: 1px !important; }` меняет смысл утилиты Tailwind по всему проекту. Если это намеренный дизайн-токен, лучше определить его централизованно, а не переопределять глобальную утилиту через `!important`.
-- Загрузка Google Fonts через CSS `@import` может задерживать применение стилей; рассмотреть `next/font` и проверить результат по измерениям производительности.
-- Проверить функциональность интерфейса: в выгрузке кнопка переключения темы и кнопки фильтров выглядят декоративными (нет обработчиков/состояния в показанных компонентах). Это не уязвимости, но недоделанные пользовательские сценарии.
-
-## Что отсутствует в выгрузке
-
-Эти файлы/данные нужны для окончательного заключения:
-
-1. SQL-схема, миграции, grants, RLS policies, индексы, триггеры и функции Supabase.
-2. Страница детали события (`/event/[id]`), страница профиля, архив и связанные маршруты.
-3. Реализации `Map` и `MapPicker`.
-4. Настройки Auth (включая подтверждение email), таблицы/триггеры профиля и настройки realtime.
-5. Реальный `.gitignore`: он перечислен в оглавлении, но его содержимое в выгрузке не представлено.
-6. Lockfile, тесты и результат production build.
-
-Содержимое `.env.local` в бандле заменено пометкой о неразглашении; секреты по этому файлу не проверялись. `NEXT_PUBLIC_SUPABASE_ANON_KEY` рассчитан на использование в браузере и не должен считаться секретом. При этом `service_role`/secret key нельзя помещать в `NEXT_PUBLIC_*` или клиентский bundle.
-
-## Рекомендуемый порядок исправлений
-
-1. **Скрытая локация:** прекратить передачу `location`, `lat`, `lng` клиенту до разрешения доступа; проверить сетевые ответы.
-2. **Supabase RLS:** провести матрицу доступа по пяти таблицам и добавить тесты на пользователя A/B, анонимного посетителя и организатора.
-3. **Заявки и вместимость:** реализовать подачу/отмену/подтверждение/отклонение через проверенные server actions или транзакционные RPC; добавить уникальные и CHECK-ограничения.
-4. **Валидация создания события:** строгая серверная схема и проверка timezone.
-5. **Регистрация и профиль:** подтвердить механизм создания профиля, обеспечить уникальность ника на БД и протестировать email confirmation.
-6. **Производительность:** убрать запросы из каждой карточки, агрегировать данные и внедрить пагинацию.
-7. **Набор качества:** lockfile, тесты RLS и бизнес-правил, lint, production build, сканер зависимостей и security headers.
-
-## Критерий готовности
-
-Перед публичным запуском должны проходить как минимум сценарии: нельзя получить скрытые координаты до подтверждения; нельзя читать/писать чужой чат; нельзя создать чужую/повторную заявку или самому одобрить её; невозможно превысить лимит участников при параллельных подтверждениях; некорректная форма не создаёт запись и не приводит к необработанному исключению; пользователь A не может читать/изменять профиль или уведомления пользователя B.
-
-````
-
 ### `supabase/.temp/cli-latest`
 
 ``
-v2.122.0
+
 ````
 
 ### `supabase/.temp/gotrue-version`
@@ -8277,7 +8084,7 @@ serve(async (req) => {
         code: qtoken,
         client_id: '8934385689',
         client_secret: CLIENT_SECRET,
-        redirect_uri: 'https://namylimsya.vercel.app/login' // <-- ВАЖНО: указываем /login, так как токен шлется сюда
+        redirect_uri: 'https://namylimsya.vercel.app/auth/callback' // <-- ВАЖНО: указываем /login, так как токен шлется сюда
       })
     });
 

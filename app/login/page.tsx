@@ -36,23 +36,20 @@ function LoginForm() {
     setLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
     });
     if (error) {
       setMessage(error.message);
       setLoading(false);
     }
   };
- // === ВХОД ЧЕРЕЗ VK ===
+
+  // === ВХОД ЧЕРЕЗ VK ===
   const handleVkLogin = async () => {
     setLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'vk' as any, // <-- Добавили as any, чтобы TypeScript не ругался
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
+      provider: 'vk' as any,
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
     });
     if (error) {
       setMessage(error.message);
@@ -73,15 +70,22 @@ function LoginForm() {
         router.push('/');
         router.refresh();
       } else {
+        // Безопасная передача данных: если поле пустое, передаем undefined
+        const metadata = {
+          username: username.trim() || undefined,
+          gender: gender || undefined,
+          city: city || undefined,
+        };
+
         const { error: authError } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { username, gender, city } },
+          options: { data: metadata },
         });
 
         if (authError) {
           if (authError.message.includes('duplicate key') || authError.message.includes('unique constraint')) {
-            throw new Error('Этот никнейм уже занят. Придумайте другой.');
+            throw new Error('Этот никнейм или email уже заняты.');
           }
           throw authError;
         }
@@ -92,7 +96,7 @@ function LoginForm() {
       let msg = 'Произошла неизвестная ошибка';
       if (error instanceof Error) {
         if (error.message.includes('duplicate key') || error.message.includes('unique constraint')) {
-          msg = 'Этот никнейм уже занят.';
+          msg = 'Этот никнейм или email уже заняты.';
         } else if (error.message.includes('Password should be at least')) {
           msg = 'Пароль слишком короткий (минимум 6 символов).';
         } else {
@@ -117,7 +121,7 @@ function LoginForm() {
         </div>
       )}
 
-      {/* Кнопки OAuth (Google и VK) */}
+      {/* Кнопки OAuth */}
       <div className="w-full flex flex-col gap-3 mb-6">
         <button
           type="button"
@@ -152,33 +156,43 @@ function LoginForm() {
 
       <form onSubmit={handleAuth} className="flex flex-col gap-4">
         {!isLogin && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш никнейм</label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Zа-яА-Я0-9_]/g, ''))}
-              required
-              minLength={3}
-              maxLength={32}
-              className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent"
-            />
-          </div>
-        )}
+          <>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш никнейм</label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Zа-яА-Я0-9_]/g, ''))}
+                required
+                minLength={3}
+                maxLength={32}
+                className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent"
+              />
+            </div>
 
-        {!isLogin && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш город</label>
-            <select
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              required
-              className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent"
-            >
-              <option value="" disabled>Выберите город</option>
-              {cities.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш город</label>
+              <select
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                required
+                className="p-2.5 bg-brand-bg border-2 border-brand-line rounded-brand outline-none focus:border-brand-accent"
+              >
+                <option value="" disabled>Выберите город</option>
+                {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {/* ВОЗВРАЩАЕМ ВЫБОР ПОЛА */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] font-extrabold uppercase text-brand-muted">Ваш пол (необязательно)</label>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setGender('male')} className={`flex-1 py-2 font-bold border-2 border-brand-line rounded-brand transition-colors ${gender === 'male' ? 'bg-brand-accent text-white' : 'bg-brand-bg'}`}>М</button>
+                <button type="button" onClick={() => setGender('female')} className={`flex-1 py-2 font-bold border-2 border-brand-line rounded-brand transition-colors ${gender === 'female' ? 'bg-brand-accent text-white' : 'bg-brand-bg'}`}>Ж</button>
+                <button type="button" onClick={() => setGender('none')} className={`flex-1 py-2 font-bold border-2 border-brand-line rounded-brand transition-colors ${gender === 'none' ? 'bg-brand-accent text-white' : 'bg-brand-bg'}`}>Другой</button>
+              </div>
+            </div>
+          </>
         )}
 
         <div className="flex flex-col gap-1.5">
